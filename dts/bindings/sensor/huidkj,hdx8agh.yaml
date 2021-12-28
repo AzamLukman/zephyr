@@ -1,0 +1,9 @@
+# Copyright (c) 2021 G-Technologies Sdn. Bhd.
+# SPDX-License-Identifier: Apache-2.0
+
+description: HUIDKJ HDX8AGH 8-channel Current Sensor
+
+compatible: "huidkj,hdx8agh"
+
+include: uart-device.yaml
+

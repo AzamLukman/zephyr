@@ -99,6 +99,11 @@ add_subdirectory_ifdef(CONFIG_TACH_XEC		mchp_tach_xec)
 add_subdirectory_ifdef(CONFIG_ITDS		wsen_itds)
 add_subdirectory_ifdef(CONFIG_MCUX_ACMP		mcux_acmp)
 add_subdirectory_ifdef(CONFIG_TACH_NPCX		nuvoton_tach_npcx)
+add_subdirectory_ifdef(CONFIG_KX022             kx022)
+add_subdirectory_ifdef(CONFIG_VMSZS		vmszs)
+add_subdirectory_ifdef(CONFIG_HDX8AGH  hdx8agh)
+add_subdirectory_ifdef(CONFIG_JSYMK163    jsymk163)
+
 
 if(CONFIG_USERSPACE OR CONFIG_SENSOR_SHELL OR CONFIG_SENSOR_SHELL_BATTERY)
 # The above if() is needed or else CMake would complain about

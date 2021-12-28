@@ -234,4 +234,13 @@ source "drivers/sensor/mcux_acmp/Kconfig"
 
 source "drivers/sensor/nuvoton_tach_npcx/Kconfig"
 
+source "drivers/sensor/kx022/Kconfig"
+
+source "drivers/sensor/vmszs/Kconfig"
+
+source "drivers/sensor/hdx8agh/Kconfig"
+
+source "drivers/sensor/jsymk163/Kconfig"
+
+
 endif # SENSOR

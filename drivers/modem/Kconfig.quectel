@@ -28,7 +28,7 @@ config MODEM_GSM_QUECTEL_GNSS_FIX_MAX_TIME_S
 config MODEM_GSM_QUECTEL_GNSS_FIX_MAX_DIST_M
 	int "Accuracy threshold of positioning in meter"
 	depends on MODEM_GSM_QUECTEL_GNSS
-	default 50
+	default 100
 	help
 	  Defines the accuracy threshold of positioning in meter. Minimum 1 meter,
 	  maximum 1000 meter. Quectel default: 50 meter.

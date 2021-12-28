@@ -1,0 +1,7 @@
+&usart1 {
+	vmszs {
+		compatible = "vemsee,vmszs";
+		label = "VMSZS";
+		status= "okay";
+	};
+};

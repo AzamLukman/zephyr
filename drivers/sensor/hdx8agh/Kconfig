@@ -1,0 +1,19 @@
+# Copyright (c) 2021 G-Technologies Sdn. Bhd.
+# SPDX-License-Identifier: Apache-2.0
+
+config HDX8AGH
+	bool "8 Channel Current sensor"
+	depends on UART_INTERRUPT_DRIVEN
+	help
+	  Enable driver for the HDX8AGH 8 Channel Current Sensor.
+
+if HDX8AGH
+
+config HDX8AGH_KEEP_MCU_AWAKE
+	bool "Keep MCU awake while polling"
+	depends on PM
+	default n
+	help
+	  Keep MCU awake while polling for data. This is required for uart driver
+	  that doesn't support wake up from stop mode.
+endif # HDX8AGH

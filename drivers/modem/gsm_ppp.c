@@ -1370,10 +1370,10 @@ static void gnss_configure(struct k_work *work)
 			k_work_reschedule(&gnss_configure_work, K_NO_WAIT);
 			break;
 		case PPP_GNSS_CFG_CONSTELLATION:
-			ret =  quectel_gnss_cfg_constellation(GNSS_CONSTELLATION_CFG);
+			ret =  quectel_gnss_cfg_constellation(4);
 			if (ret < 0) {
 				LOG_ERR("quectel_gnss_cfg_constellation: %d failed: %d",
-					GNSS_CONSTELLATION_CFG, ret);
+					4, ret);
 				k_work_reschedule(&gnss_configure_work, K_SECONDS(2));
 				return;
 			}

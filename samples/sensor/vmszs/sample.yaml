@@ -1,0 +1,30 @@
+#
+# Copyright (c) 2021 G-Technologies Sdn. Bhd.
+#
+# SPDX-License-Identifier: Apache-2.0
+
+common:
+  build_only: true
+  harness: sensor
+  tags: sensors
+  depends_on: serial
+  filter: dt_compat_enabled("winsen,mhz19b")
+  platform_allow: nucleo_g0b1re
+  integration_platforms:
+    - nucleo_g0b1re
+  extra_args: DTC_OVERLAY_FILE="boards/nucleo_g0b1re.overlay"
+sample:
+  name: MH-Z19B CO2 sensor
+tests:
+  sample.sensor.mhz19b.pm_keep_awake:
+    extra_configs:
+      - CONFIG_UART_INTERRUPT_DRIVEN=y
+      - CONFIG_PM=y
+      - CONFIG_MHZ19B_KEEP_MCU_AWAKE=y
+  sample.sensor.mhz19b.pm_no_keep_awake:
+    extra_configs:
+      - CONFIG_UART_INTERRUPT_DRIVEN=y
+      - CONFIG_PM=y
+  sample.sensor.mhz19b.normal:
+    extra_configs:
+      - CONFIG_UART_INTERRUPT_DRIVEN=y
