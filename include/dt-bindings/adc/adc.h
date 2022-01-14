@@ -14,6 +14,8 @@
 #define BIT_MASK(n) ((1 << (n)) - 1)
 #endif
 
+/** Acquisition time is expressed in milliseconds. */
+#define ADC_ACQ_TIME_MILLISECONDS  (0)
 /** Acquisition time is expressed in microseconds. */
 #define ADC_ACQ_TIME_MICROSECONDS  (1)
 /** Acquisition time is expressed in nanoseconds. */

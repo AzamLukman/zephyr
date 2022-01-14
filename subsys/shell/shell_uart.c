@@ -80,7 +80,7 @@ static void uart_rx_handle(const struct device *dev,
 			uint8_t dummy;
 
 			/* No space in the ring buffer - consume byte. */
-			LOG_WRN("RX ring buffer full.");
+			LOG_DBG("RX ring buffer full.");
 
 			rd_len = uart_fifo_read(dev, &dummy, 1);
 #ifdef CONFIG_MCUMGR_SMP_SHELL
@@ -181,7 +181,7 @@ static void timer_handler(struct k_timer *timer)
 	while (uart_poll_in(sh_uart->ctrl_blk->dev, &c) == 0) {
 		if (ring_buf_put(sh_uart->rx_ringbuf, &c, 1) == 0U) {
 			/* ring buffer full. */
-			LOG_WRN("RX ring buffer full.");
+			LOG_DBG("RX ring buffer full.");
 		}
 		sh_uart->ctrl_blk->handler(SHELL_TRANSPORT_EVT_RX_RDY,
 					   sh_uart->ctrl_blk->context);

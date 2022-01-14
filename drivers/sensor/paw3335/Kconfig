@@ -1,0 +1,7 @@
+menuconfig PAW33335
+	bool "PAW33335 sensor"
+	depends on SPI
+	help
+	  enable driver for pixart paw33335 cmos sensor.
+if PAW33335
+endif 	  

@@ -242,5 +242,7 @@ source "drivers/sensor/hdx8agh/Kconfig"
 
 source "drivers/sensor/jsymk163/Kconfig"
 
+source "drivers/sensor/paw3335/Kconfig"
+
 
 endif # SENSOR

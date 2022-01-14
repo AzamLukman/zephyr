@@ -8,9 +8,15 @@
 #ifndef ZEPHYR_DRIVERS_SENSOR_KX022_KX022_H_
 #define ZEPHYR_DRIVERS_SENSOR_KX022_KX022_H_
 
-#include <zephyr/types.h>
-#include <drivers/sensor.h>
+#include <device.h>
 #include <drivers/gpio.h>
+#include <drivers/i2c.h>
+#include <drivers/sensor/kx022.h>
+#include <drivers/sensor.h>
+#include <sys/byteorder.h>
+#include <logging/log.h>
+
+#define KX022_RESET_DELAY 2000
 
 #define KX022_REG_XHP_L 0x0
 #define KX022_REG_XHP_H 0x1
@@ -92,17 +98,21 @@
 #define KX022_MASK_CNTL1_TPE BIT(0)
 #define KX022_MASK_CNTL_POWER_MODE (BIT(7) | BIT(1))
 #define KX022_MASK_CNTL_INT_TYPE_EN (BIT(2) | BIT(1) | BIT(0))
+
 #define KX022_DEFAULT_CNTL1 0x40
 #define KX022_CNTL1_DRDYE (0x01 << 5)
 #define KX022_CNTL1_WUFE (0x01 << 1)
 #define KX022_CNTL1_TPE_EN 1
-#define KX022_STANDY_MODE 0
-#define KX022_OPERATING_MODE 1
+#define KX022_STANDY_MODE false
+#define KX022_OPERATING_MODE true
+#define KX022_CNTL1_WUFE_RESET 0
+#define KX022_CNTL1_TPE_RESET 0
 
-#define KX022_CNTL1_TDTE_SHIFF 2
-#define KX022_CNTL1_GSEL_SHIFF 3
-#define KX022_CNTL1_DRDYE_SHIFF 5
-#define KX022_CNTL1_PC1_SHIFF 7
+#define KX022_CNTL1_TDTE_SHIFT 2
+#define KX022_CNTL1_GSEL_SHIFT 3
+#define KX022_CNTL1_DRDYE_SHIFT 5
+#define KX022_CNTL1_PC1_SHIFT 7
+#define KX022_CNTL1_RES_SHIFT 6
 
 #define KX022_REG_CNTL2 0x19
 #define KX022_VAL_CNTL2_RESET 0x3F
@@ -117,12 +127,13 @@
 #define KX022_CNTL_TILT_ALL_EN 0x3F
 
 #define KX022_REG_CNTL3 0x1A
-#define KX022_DEFAULT_CNTL3 0xD6
+#define KX022_DEFAULT_CNTL3_50HZ 0xD6
 #define KX022_VAL_CNTL3_RESET 0x98
 #define KX022_MASK_CNTL3_OTP (BIT(7) | BIT(6))
 #define KX022_MASK_CNTL3_OTDT (BIT(5) | BIT(4) | BIT(3))
 #define KX022_MASK_CNTL3_OWUF (BIT(2) | BIT(1) | BIT(0))
-#define KX022_OTP_SHIFT 6
+#define KX022_CNTL3_OTP_SHIFT 6
+
 #define KX022_REG_ODCNTL 0x1B
 #define KX022_VAL_ODCNTL_RESET 0x02
 #define KX022_MASK_ODCNTL_IIR_BYPASS BIT(7)
@@ -132,79 +143,83 @@
 
 #define KX022_REG_INC1 0x1C
 #define KX022_VAL_INC1_RESET 0x10
-#define KX022_MAKS_INC1_IEN1 BIT(5)
-#define KX022_MAKS_INC1_IEA1 BIT(4)
-#define KX022_MAKS_INC1_IEL1 BIT(3)
-#define KX022_MAKS_INC1_STPOL BIT(1)
-#define KX022_MAKS_INC1_SPI3E BIT(0)
-#define KX022_MAKS_INC1_INT_EN                                                 \
-	KX022_MAKS_INC1_IEN1 | KX022_MAKS_INC1_IEA1 | KX022_MAKS_INC1_IEL1
+#define KX022_MASK_INC1_IEN1 BIT(5)
+#define KX022_MASK_INC1_IEA1 BIT(4)
+#define KX022_MASK_INC1_IEL1 BIT(3)
+#define KX022_MASK_INC1_STPOL BIT(1)
+#define KX022_MASK_INC1_SPI3E BIT(0)
+#define KX022_MASK_INC1_INT_EN KX022_MASK_INC1_IEN1 | KX022_MASK_INC1_IEA1 | KX022_MASK_INC1_IEL1
 #define KX022_INT1_EN (6 << 3)
+#define KX022_INC1_IEA1_SHIFT 4
+#define KX022_INC1_IEL1_SHIFT 3
 
 #define KX022_REG_INC2 0x1D
 #define KX022_VAL_INC2_RESET 0x3F
-#define KX022_MAKS_INC2_XNWUE BIT(5)
-#define KX022_MAKS_INC2_XPWUE BIT(4)
-#define KX022_MAKS_INC2_YNWUE BIT(3)
-#define KX022_MAKS_INC2_YPWUE BIT(2)
-#define KX022_MAKS_INC2_ZNWUE BIT(1)
-#define KX022_MAKS_INC2_ZPWUE BIT(0)
+#define KX022_MASK_INC2_XNWUE BIT(5)
+#define KX022_MASK_INC2_XPWUE BIT(4)
+#define KX022_MASK_INC2_YNWUE BIT(3)
+#define KX022_MASK_INC2_YPWUE BIT(2)
+#define KX022_MASK_INC2_ZNWUE BIT(1)
+#define KX022_MASK_INC2_ZPWUE BIT(0)
 #define KX022_DEFAULT_INC2 0x3F
 
 #define KX022_REG_INC3 0x1E
 #define KX022_VAL_INC3_RESET 0x3F
-#define KX022_MAKS_INC3_TLEM BIT(5)
-#define KX022_MAKS_INC3_TRIM BIT(4)
-#define KX022_MAKS_INC3_TDOM BIT(3)
-#define KX022_MAKS_INC3_TUPM BIT(2)
-#define KX022_MAKS_INC3_TFDM BIT(1)
-#define KX022_MAKS_INC3_TFUM BIT(0)
+#define KX022_MASK_INC3_TLEM BIT(5)
+#define KX022_MASK_INC3_TRIM BIT(4)
+#define KX022_MASK_INC3_TDOM BIT(3)
+#define KX022_MASK_INC3_TUPM BIT(2)
+#define KX022_MASK_INC3_TFDM BIT(1)
+#define KX022_MASK_INC3_TFUM BIT(0)
 
 #define KX022_REG_INC4 0x1F
 #define KX022_VAL_INC4_RESET 0x0
-#define KX022_MAKS_INC4_BFI1 BIT(6)
-#define KX022_MAKS_INC4_WMI1 BIT(5)
-#define KX022_MAKS_INC4_DRDYI1 BIT(4)
-#define KX022_MAKS_INC4_TDTI1 BIT(2)
-#define KX022_MAKS_INC4_WUFI1 BIT(1)
-#define KX022_MAKS_INC4_TPI1 BIT(0)
-#define KX022_INC4_WUFI1 (0x01 << 1)
-#define KX022_INC4_WUFI1_DIS (0x0 << 1)
+#define KX022_MASK_INC4_BFI1 BIT(6)
+#define KX022_MASK_INC4_WMI1 BIT(5)
+#define KX022_MASK_INC4_DRDYI1 BIT(4)
+#define KX022_MASK_INC4_TDTI1 BIT(2)
+#define KX022_MASK_INC4_WUFI1 BIT(1)
+#define KX022_MASK_INC4_TPI1 BIT(0)
+/* Wake-Up (motion detect) interrupt reported on physical interrupt pin INT1 */
+#define KX022_INC4_WUFI1_SET (0x01 << 1)
+#define KX022_INC4_WUFI1_RESET (0x00)
+/* Data ready interrupt reported on physical interrupt pin INT1 */
 #define KX022_INC4_DRDYI1 (0x01 << 4)
-#define KX022_INC4_TPI1 (0x01 << 0)
-#define KX022_INC4_TPI1_DIS (0x00 << 0)
+#define KX022_INC4_TPI1_SET (0x01)
+#define KX022_INC4_TPI1_RESET (0x00)
 
 #define KX022_REG_INC5 0x20
 #define KX022_VAL_INC5_RESET 0x10
-#define KX022_MAKS_INC5_IEN2 BIT(5)
-#define KX022_MAKS_INC5_IEA2 BIT(4)
-#define KX022_MAKS_INC5_IEL2 BIT(3)
-#define KX022_MAKS_INT2_EN                                                     \
-	KX022_MAKS_INC5_IEN2 | KX022_MAKS_INC5_IEA2 | KX022_MAKS_INC5_IEL2
+#define KX022_MASK_INC5_IEN2 BIT(5)
+#define KX022_MASK_INC5_IEA2 BIT(4)
+#define KX022_MASK_INC5_IEL2 BIT(3)
+#define KX022_MASK_INT2_EN KX022_MASK_INC5_IEN2 | KX022_MASK_INC5_IEA2 | KX022_MASK_INC5_IEL2
 #define KX022_INT2_EN (6 << 3)
+#define KX022_INC5_IEA2_SHIFT 4
+#define KX022_INC5_IEL2_SHIFT 3
+
 #define KX022_REG_INC6 0x21
 #define KX022_VAL_INC6_RESET 0x0
-#define KX022_MAKS_INC6_BFI2 BIT(6)
-#define KX022_MAKS_INC6_WMI2 BIT(5)
-#define KX022_MAKS_INC6_DRDYI2 BIT(4)
-#define KX022_MAKS_INC6_TDTI2 BIT(2)
-#define KX022_MAKS_INC6_WUFI2 BIT(1)
-#define KX022_MAKS_INC6_TPI2 BIT(0)
-#define KX022_INC6_TPI2 (0x01 << 0)
-#define KX022_INC6_TPI2_DIS (0x00 << 0)
-#define KX022_INC6_WUFI2 (0x01 << 1)
-#define KX022_INC6_WUFI2_DIS (0x00 << 1)
+#define KX022_MASK_INC6_BFI2 BIT(6)
+#define KX022_MASK_INC6_WMI2 BIT(5)
+#define KX022_MASK_INC6_DRDYI2 BIT(4)
+#define KX022_MASK_INC6_TDTI2 BIT(2)
+#define KX022_MASK_INC6_WUFI2 BIT(1)
+#define KX022_MASK_INC6_TPI2 BIT(0)
+#define KX022_INC6_TPI2_SET (0x01)
+#define KX022_INC6_TPI2_RESET (0x00)
+#define KX022_INC6_WUFI2_SET (0x01 << 1)
+#define KX022_INC6_WUFI2_RESET (0x00)
+/* DRDYI2  Data ready interrupt reported on physical interrupt pin INT2 */
 #define KX022_INC6_DRDYI2 (0x01 << 4)
 
 #define KX022_REG_TILT_TIMER 0x22
 #define KX022_VAL_TILT_TIMER_RESET 0x0
 #define KX022_MASK_TILT_TIMER_TSC 0xFF
-#define KX022_REG_TILT_ANGLE_LL 0X32
-#define KX022_REG_TILT_ANGLE_HL 0x33
+
 #define KX022_REG_WUFC 0x23
 #define KX022_VAL_WUFC_RESET 0x0
 #define KX022_MASK_WUFC_TSC 0xFF
-#define KX022_DEFAULT_TILT_TIMER 0x01
 
 #define KX022_REG_TDTRC 0x24
 #define KX022_VAL_TDTRC_RESET 0x03
@@ -244,19 +259,18 @@
 #define KX022_VAL_ATH_RESET 0x08
 #define KX022_MASK_ATH_ATH 0xFF
 
-#define KX022_REG_LL 0x32
+#define KX022_REG_TILT_ANGLE_LL 0x32
 #define KX022_VAL_LL_RESET 0x0C
-#define KX022_MASK_LL_TA 0xFF
+#define KX022_MASK_LL_LL 0xFF
 
-#define KX022_REG_HL 0x33
+#define KX022_REG_TILT_ANGLE_HL 0x33
 #define KX022_VAL_HL_RESET 0x2A
 #define KX022_MASK_HL_HL 0xFF
 
 #define KX022_REG_HYST_SET 0x34
 #define KX022_VAL_HYST_SET_RESET 0x14
 #define KX022_MASK_HYST_SET_RES (BIT(7) | BIT(6))
-#define KX022_MASK_HYST_SET_HYST                                               \
-	(BIT(5) | BIT(4) | BIT(3) | BIT(2) | BIT(1) | BIT(0))
+#define KX022_MASK_HYST_SET_HYST (BIT(5) | BIT(4) | BIT(3) | BIT(2) | BIT(1) | BIT(0))
 
 #define KX022_REG_LP_CNTL 0x35
 #define KX022_VAL_LP_CNTL_RESET 0x4B
@@ -264,8 +278,7 @@
 
 #define KX022_REG_BUF_CNTL1 0x3A
 #define KX022_VAL_BUF_CNTL1_RESET 0x0
-#define KX022_MASK_BUF_CNTL1_SMP_TH                                            \
-	(BIT(6) | BIT(5) | BIT(4) | BIT(3) | BIT(2) | BIT(1) | BIT(0))
+#define KX022_MASK_BUF_CNTL1_SMP_TH (BIT(6) | BIT(5) | BIT(4) | BIT(3) | BIT(2) | BIT(1) | BIT(0))
 
 #define KX022_REG_BUF_CNTL2 0x3B
 #define KX022_VAL_BUF_CNTL2_RESET 0x0
@@ -289,103 +302,74 @@
 #define KX022_REG_SELF_TEST_DISABLE 0x0
 
 #define KX022_STNDBY_MODE_MOTION 0x42
-#define KX022_ODCNTL_50hz 0x06
 
-/* KX022 MOTION THS AND DURATION*/
-#define KX022_ATH_THS CONFIG_KX022_MOTION_THS
-#define KX022_WUFC_DUR CONFIG_KX022_MOTION_DURATION
+#define KX022_FS_2G 0x0
+#define KX022_FS_4G 0x1
+#define KX022_FS_8G 0x2
+#define KX022_ODR_RANGE_MAX 0x07
+#define KX022_FS_RANGE_MAX 0x03
+#define KX022_RES_RANGE_MAX 0x01
+#define KX022_ATH_RANGE_MAX 0xFF
+#define KX022_WUFC_RANGE_MAX 0xFF
+#define KX022_TILT_ANGLE_LL_RANGE_MAX 0xFF
+#define KX022_TILT_TIMER_RANGE_MAX 0xFF
+#define KX022_MOTION_THS_RANGE_MAX 0xFF
+#define KX022_ATH_RANGE_MIN 0
+#define KX022_TILT_ANGLE_LL_MIN 0
 
-#define KX022_DEF_TILT_ANGLE_LL CONFIG_KX022_TILT_ANGLE_LL_SET
-#define KX022_DEF_TILT_ANGLE_HL CONFIG_KX022_TILT_ANGLE_HL_SET
-/*Screen Rotation -+15 deg */
-#define KX022_DEF_HYST_SET 0x14
+#define BITWISE_SHIFT_7 7
+#define BITWISE_SHIFT_6 6
+#define BITWISE_SHIFT_5 5
+#define BITWISE_SHIFT_4 4
+#define BITWISE_SHIFT_3 3
+#define BITWISE_SHIFT_2 2
+#define BITWISE_SHIFT_1 1
+#define KX022_INIT_DELAY 100
+
 /* Accel sensor sensitivity unit is 0.061 mg/LSB */
 #define GAIN_XL (6103515625LL / 1000000000000.0)
 
-#if CONFIG_KX022_TILT_ODR == 1
-#define KX022_DEFAULT_TILT_ODR 0
-#elif CONFIG_KX022_TILT_ODR == 2
-#define KX022_DEFAULT_TILT_ODR 1
-#elif CONFIG_KX022_TILT_ODR == 3
-#define KX022_DEFAULT_TILT_ODR 2
-#elif CONFIG_KX022_TILT_ODR == 4
-#define KX022_DEFAULT_TILT_ODR 3
-#else
-#error "Undefined"
-#endif
-
-#define KX022_TILT_TIMES_DURATION 1
-
-#if CONFIG_KX022_FS == 0
-#define KX022_FS_RUNTIME 1
-#define KX022_DEFAULT_FS 0x0
-#define KX022_DEFAULT_GAIN GAIN_XL
-#elif CONFIG_KX022_FS == 2
-#define KX022_DEFAULT_FS 0x0
-#define KX022_DEFAULT_GAIN GAIN_XL
-#elif CONFIG_KX022_FS == 4
-#define KX022_DEFAULT_FS 0x1
-#define KX022_DEFAULT_GAIN (2.0 * GAIN_XL)
-#elif CONFIG_KX022_FS == 8
-#define KX022_DEFAULT_FS 0x2
-#define KX022_DEFAULT_GAIN (4.0 * GAIN_XL)
-#else
-#error "Bad KX022 FS value (should be 0, 2, 4, 8)"
-#endif /* CONFIG_KX022_FS == 0 */
-
-
-#if (CONFIG_KX022_ODR == 0)
-#define KX022_ODR_RUNTIME 1
-#define KX022_DEFAULT_ODR 2
-#elif (CONFIG_KX022_ODR >= 1 && CONFIG_KX022_ODR <= 12)
-#define KX022_DEFAULT_ODR (CONFIG_KX022_ODR - 1)
-#else
-#error "Bad KX022 ODR value (should be between 1 to 12)"
-#endif /* (CONFIG_KX022_ODR == 0) */
-
-#if (CONFIG_KX022_RES == 0)
-#define KX022_RES_RUNTIME 1
-#define KX022_DEFAULT_RES 1
-#elif (CONFIG_KX022_RES == 1)
-#define KX022_DEFAULT_RES 0
-#elif (CONFIG_KX022_RES == 2)
-#define KX022_DEFAULT_RES 1
-#endif /* (CONFIG_KX022_RES == 0) */
-
 struct kx022_config {
-	char *comm_master_dev_name;
 	int (*bus_init)(const struct device *dev);
-	struct i2c_dt_spec bus;
+	struct i2c_dt_spec bus_cfg;
+	uint8_t int_pin_1_polarity;
+	uint8_t int_pin_1_response;
+	uint8_t full_scale;
+	uint8_t odr;
+	uint8_t resolution;
+	uint8_t motion_odr;
+	uint8_t motion_threshold;
+	uint8_t motion_detection_timer;
+	uint8_t tilt_odr;
+	uint8_t tilt_timer;
+	uint8_t tilt_angle_ll;
+	uint8_t tilt_angle_hl;
 #ifdef CONFIG_KX022_TRIGGER
-	const char *irq_port;
-	gpio_pin_t irq_pin;
-	gpio_dt_flags_t irq_flags;
+	// const char *irq_port;
+	// gpio_pin_t irq_pin;
+	// gpio_dt_flags_t irq_flags;
+	struct gpio_dt_spec gpio_int;
+	uint8_t int_pin;
 #endif
 };
 
 struct kx022_data;
 
 struct kx022_transfer_function {
-	int (*read_data)(struct kx022_data *data, uint8_t reg_addr,
-			 uint8_t *value, uint8_t len);
-	int (*write_data)(struct kx022_data *data, uint8_t reg_addr,
-			  uint8_t *value, uint8_t len);
-	int (*read_reg)(struct kx022_data *data, uint8_t reg_addr,
-			uint8_t *value);
-	int (*write_reg)(struct kx022_data *data, uint8_t reg_addr,
-			 uint8_t value);
-	int (*update_reg)(struct kx022_data *data, uint8_t reg_addr,
-			  uint8_t mask, uint8_t value);
+	int (*read_data)(const struct device *dev, uint8_t reg_addr, uint8_t *value, uint8_t len);
+	int (*write_data)(const struct device *dev, uint8_t reg_addr, uint8_t *value, uint8_t len);
+	int (*read_reg)(const struct device *dev, uint8_t reg_addr, uint8_t *value);
+	int (*write_reg)(const struct device *dev, uint8_t reg_addr, uint8_t value);
+	int (*update_reg)(const struct device *dev, uint8_t reg_addr, uint8_t mask, uint8_t value);
 };
 
 struct kx022_data {
-	const struct device *comm_master;
 	int sample_x;
 	int sample_y;
 	int sample_z;
-	int sample_tspp;
-	int sample_tscp;
-	int sample_motion_dir;
+	uint8_t sample_tspp;
+	uint8_t sample_tscp;
+	uint8_t sample_motion_dir;
 	float gain;
 	const struct kx022_transfer_function *hw_tf;
 
@@ -393,14 +377,11 @@ struct kx022_data {
 	const struct device *gpio;
 	struct gpio_callback gpio_cb;
 
-	struct sensor_trigger drdy_trigger;
-	sensor_trigger_handler_t drdy_handler;
-
 	struct sensor_trigger motion_trigger;
 	sensor_trigger_handler_t motion_handler;
 
-	struct sensor_trigger slope_trigger;
-	sensor_trigger_handler_t slope_handler;
+	struct sensor_trigger tilt_trigger;
+	sensor_trigger_handler_t tilt_handler;
 	const struct device *dev;
 
 #if defined(CONFIG_KX022_TRIGGER_OWN_THREAD)
@@ -417,12 +398,11 @@ struct kx022_data {
 int kx022_i2c_init(const struct device *dev);
 
 #ifdef CONFIG_KX022_TRIGGER
-int kx022_trigger_set(const struct device *dev,
-		      const struct sensor_trigger *trig,
+int kx022_trigger_set(const struct device *dev, const struct sensor_trigger *trig,
 		      sensor_trigger_handler_t handler);
 
 int kx022_trigger_init(const struct device *dev);
-void kx022_mode(const struct device *dev, bool mode);
+int kx022_mode(const struct device *dev, bool mode);
 
 #endif
 

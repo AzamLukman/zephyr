@@ -8,12 +8,7 @@
 #include <sys/printk.h>
 #include <drivers/sensor.h>
 #include <drivers/sensor/vmszs.h>
-int accel_test(void)
-{
-	const struct device *sensor = device_get_binding(DT_LABEL(DT_INST(0, kionix_kx022)));
 
-	fetch_and_display(sensor);
-}
 void main(void)
 {
 	const struct device *dev =device_get_binding(DT_LABEL(DT_INST(0, vemsee_vmszs)));

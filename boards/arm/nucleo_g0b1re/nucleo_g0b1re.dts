@@ -140,6 +140,15 @@ zephyr_udc0: &usb {
 	pinctrl-0 = <&spi1_nss_pb0 &spi1_sck_pa5
 		     &spi1_miso_pa6 &spi1_mosi_pa7>;
 	status = "okay";
+	paw3335d@0{
+		compatible = "pixart,paw3335d";
+		label = "PAW3335D";
+		spi-max-frequency = <4000000>; /*4Mhz */
+		reg = <0>;
+		status = "okay";
+
+	};
+
 };
 
 &spi2 {

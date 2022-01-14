@@ -58,3 +58,7 @@ tests:
     platform_allow: mec15xxevb_assy6853
     tags: adc_xec
     extra_args: "CONFIG_ADC_XEC=y"
+  # drivers.adc.i2c.build:
+  #   platform_allow: native_posix
+  #   tags: adc_ads1119
+  #   extra_args: "CONFIG_I2C=y CONFIG_ADC_ADS1119=y"

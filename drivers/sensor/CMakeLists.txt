@@ -103,6 +103,7 @@ add_subdirectory_ifdef(CONFIG_KX022             kx022)
 add_subdirectory_ifdef(CONFIG_VMSZS		vmszs)
 add_subdirectory_ifdef(CONFIG_HDX8AGH  hdx8agh)
 add_subdirectory_ifdef(CONFIG_JSYMK163    jsymk163)
+add_subdirectory_ifdef(CONFIG_PAW33335    paw3335)
 
 
 if(CONFIG_USERSPACE OR CONFIG_SENSOR_SHELL OR CONFIG_SENSOR_SHELL_BATTERY)

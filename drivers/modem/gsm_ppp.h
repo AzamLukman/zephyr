@@ -106,4 +106,7 @@ void power_off_ops(struct modem_context *ctx)
 #endif
 }
 
+int gsm_get_rssi(uint8_t *rssi_data);
+
 #endif /* MODEM_GSM_PPP_H */
+

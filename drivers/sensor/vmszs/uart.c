@@ -3,8 +3,6 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  *
- * Datasheet:
- * https://www.winsen-sensor.com/sensors/co2-sensor/mh-z19b.html
  */
 
 #include <logging/log.h>

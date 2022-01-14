@@ -4,14 +4,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-#include <stdio.h>
-#include <device.h>
-#include <drivers/i2c.h>
-#include <sys/__assert.h>
-#include <sys/util.h>
-#include <kernel.h>
-#include <drivers/sensor.h>
-#include <logging/log.h>
+
 #include "kx022.h"
 
 LOG_MODULE_DECLARE(KX022, CONFIG_SENSOR_LOG_LEVEL);
@@ -19,10 +12,7 @@ LOG_MODULE_DECLARE(KX022, CONFIG_SENSOR_LOG_LEVEL);
 static void kx022_gpio_callback(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 {
 	struct kx022_data *data = CONTAINER_OF(cb, struct kx022_data, gpio_cb);
-	const struct kx022_config *cfg = data->dev->config;
 
-	ARG_UNUSED(pins);
-	gpio_pin_interrupt_configure(data->gpio, cfg->irq_pin, GPIO_INT_DISABLE);
 #if defined(CONFIG_KX022_TRIGGER_OWN_THREAD)
 	k_sem_give(&data->trig_sem);
 #elif defined(CONFIG_KX022_TRIGGER_GLOBAL_THREAD)
@@ -39,44 +29,38 @@ static void kx022_handle_motion_int(const struct device *dev)
 	}
 }
 
-static void kx022_handle_drdy_int(const struct device *dev)
+static void kx022_handle_tilt_int(const struct device *dev)
 {
 	struct kx022_data *data = dev->data;
 
-	if (data->drdy_handler != NULL) {
-		data->drdy_handler(dev, &data->drdy_trigger);
-	}
-}
-static void kx022_handle_slope_int(const struct device *dev)
-{
-	struct kx022_data *data = dev->data;
-
-	if (data->slope_handler != NULL) {
-		data->slope_handler(dev, &data->slope_trigger);
+	if (data->tilt_handler != NULL) {
+		data->tilt_handler(dev, &data->tilt_trigger);
 	}
 }
 
 static void kx022_handle_int(const struct device *dev)
 {
 	struct kx022_data *data = dev->data;
-	const struct kx022_config *cfg = dev->config;
 	uint8_t status, clr;
+	int ret;
 
-	if (data->hw_tf->read_reg(data, KX022_REG_INS2, &status) < 0) {
+	ret = data->hw_tf->read_reg(dev, KX022_REG_INS2, &status);
+	if (ret < 0) {
 		return;
 	}
 
-	if (status & 0x02) {
+	if (status & KX022_MASK_INS2_WUFS) {
 		kx022_handle_motion_int(dev);
-	} else if (status & 0x10) {
-		kx022_handle_drdy_int(dev);
-		k_msleep(50);
-
-	} else if (status & 0x01) {
-		kx022_handle_slope_int(dev);
 	}
-	data->hw_tf->read_reg(data, KX022_REG_INT_REL, &clr);
-	gpio_pin_interrupt_configure(data->gpio, cfg->irq_pin, GPIO_INT_EDGE_TO_ACTIVE);
+
+	if (status & KX022_MASK_INS2_TPS) {
+		kx022_handle_tilt_int(dev);
+	}
+
+	ret = data->hw_tf->read_reg(dev, KX022_REG_INT_REL, &clr);
+	if (ret < 0) {
+		LOG_ERR("Failed clear int report flag");
+	}
 }
 
 #ifdef CONFIG_KX022_TRIGGER_OWN_THREAD
@@ -105,41 +89,50 @@ static void kx022_work_cb(struct k_work *work)
  * ************************************************************/
 int kx022_trigger_init(const struct device *dev)
 {
+	uint8_t val;
 	struct kx022_data *data = dev->data;
 	const struct kx022_config *cfg = dev->config;
-	uint8_t clr;
+	int ret;
+
 	/* setup data ready gpio interrupt */
-	data->gpio = device_get_binding(cfg->irq_port);
-	if (data->gpio == NULL) {
-		LOG_ERR("Cannot get pointer to %s device.", cfg->irq_port);
+
+
+	if(!device_is_ready(cfg->gpio_int.port))
+	{
+		if(cfg->gpio_int.port){
+			LOG_ERR("%s: device %s is not ready", dev->name,
+						cfg->gpio_int.port->name);
+			return -ENODEV;
+		}
+	}
+
+	ret = gpio_pin_configure_dt(&cfg->gpio_int,GPIO_INPUT);
+	if (ret <0) {
+		LOG_ERR("Could not configure gpio");
 		return -EINVAL;
 	}
 
-	data->hw_tf->read_reg(data, KX022_REG_INT_REL, &clr);
+	gpio_init_callback(&data->gpio_cb,
+			   kx022_gpio_callback,
+			   BIT(cfg->gpio_int.pin));
 
-	gpio_pin_configure(data->gpio, cfg->irq_pin, GPIO_INPUT | cfg->irq_flags);
-
-	gpio_init_callback(&data->gpio_cb, kx022_gpio_callback, BIT(cfg->irq_pin));
-
-	if (gpio_add_callback(data->gpio, &data->gpio_cb) < 0) {
+	if (gpio_add_callback(cfg->gpio_int.port, &data->gpio_cb) < 0) {
 		LOG_ERR("Could not set gpio callback.");
 		return -EIO;
 	}
-	data->dev = dev;
 
-	kx022_mode(dev, KX022_STANDY_MODE);
+	/* Enable kx022 physical int 1 */
+	val = KX022_MASK_INC1_IEN1;
+	val |= (cfg->int_pin_1_polarity << KX022_INC1_IEA1_SHIFT);
+	val |= (cfg->int_pin_1_response << KX022_INC1_IEL1_SHIFT);
 
-	if (IS_ENABLED(CONFIG_KX022_INT1_PIN)) {
-		data->hw_tf->update_reg(data, KX022_REG_INC1, KX022_MAKS_INC1_INT_EN,
-					KX022_INT1_EN);
-	} else {
-		data->hw_tf->update_reg(data, KX022_REG_INC5, KX022_MAKS_INT2_EN, KX022_INT2_EN);
+	ret = data->hw_tf->write_reg(dev, KX022_REG_INC1, val);
+	if (ret  < 0) {
+		LOG_ERR("Failed set physical int 1");
+		return -EIO;
 	}
 
-
-
-	kx022_mode(dev, KX022_OPERATING_MODE);
-
+	data->dev = dev;
 #if defined(CONFIG_KX022_TRIGGER_OWN_THREAD)
 	k_sem_init(&data->trig_sem, 0, UINT_MAX);
 
@@ -148,152 +141,270 @@ int kx022_trigger_init(const struct device *dev)
 			K_PRIO_COOP(CONFIG_KX022_THREAD_PRIORITY), 0, K_NO_WAIT);
 #elif defined(CONFIG_KX022_TRIGGER_GLOBAL_THREAD)
 	data->work.handler = kx022_work_cb;
-
 #endif
-
-	gpio_pin_interrupt_configure(data->gpio, cfg->irq_pin, GPIO_INT_EDGE_TO_ACTIVE);
+	ret = gpio_pin_interrupt_configure_dt(&cfg->gpio_int,
+					       GPIO_INT_DISABLE);
+	if (ret < 0) {
+		LOG_ERR("Failed INT_DISABLE");
+		return -EINVAL;
+	}
 
 	return 0;
 }
 
-void kx022_motion_setup(const struct device *dev, sensor_trigger_handler_t handler)
+int kx022_motion_setup(const struct device *dev, sensor_trigger_handler_t handler)
 {
 	struct kx022_data *data = dev->data;
+	const struct kx022_config *cfg = dev->config;
+	int ret;
 
 	data->motion_handler = handler;
 
-	/* Enable Motion detection */
-	data->hw_tf->update_reg(data, KX022_REG_CNTL1, KX022_MASK_CNTL1_WUFE, KX022_CNTL1_WUFE);
-
-	data->hw_tf->update_reg(data, KX022_REG_ODCNTL, KX022_MASK_ODCNTL_OSA, KX022_ODCNTL_50HZ);
-
-	data->hw_tf->write_reg(data, KX022_REG_INC2, KX022_DEFAULT_INC2);
-
-	data->hw_tf->write_reg(data, KX022_REG_WUFC, KX022_WUFC_DUR);
-	data->hw_tf->write_reg(data, KX022_REG_ATH, KX022_ATH_THS);
-
-	if (IS_ENABLED(CONFIG_KX022_INT1_PIN)) {
-		data->hw_tf->update_reg(data, KX022_REG_INC4, KX022_MAKS_INC4_WUFI1,
-					KX022_INC4_WUFI1);
-	} else {
-		data->hw_tf->update_reg(data, KX022_REG_INC6, KX022_MAKS_INC6_WUFI2,
-					KX022_MAKS_INC6_WUFI2);
-	}
-}
-
-void kx022_drdy_setup(const struct device *dev, sensor_trigger_handler_t handler)
-{
-	struct kx022_data *data = dev->data;
-
-	data->drdy_handler = handler;
-
-	data->hw_tf->update_reg(data, KX022_REG_CNTL1, KX022_MASK_CNTL1_DRDYE, KX022_CNTL1_DRDYE);
-	data->hw_tf->update_reg(data, KX022_REG_ODCNTL, KX022_MASK_ODCNTL_OSA, KX022_ODCNTL_50HZ);
-
-	if (IS_ENABLED(CONFIG_KX022_INT1_PIN)) {
-		data->hw_tf->update_reg(data, KX022_REG_INC4, KX022_MAKS_INC4_DRDYI1,
-					KX022_INC4_DRDYI1);
-	} else {
-		data->hw_tf->update_reg(data, KX022_REG_INC6, KX022_MAKS_INC6_DRDYI2,
-					KX022_INC6_DRDYI2);
-	}
-}
-
-void kx022_tilt_setup(const struct device *dev, sensor_trigger_handler_t handler)
-{
-	struct kx022_data *data = dev->data;
-
-	data->slope_handler = handler;
-
-	data->hw_tf->update_reg(data, KX022_REG_CNTL1, KX022_MASK_CNTL1_TPE, KX022_CNTL1_TPE_EN);
-
-	k_msleep(50);
-	data->hw_tf->write_reg(data, KX022_REG_CNTL2, KX022_CNTL_TILT_ALL_EN);
-	k_msleep(50);
-
-	data->hw_tf->update_reg(data, KX022_REG_CNTL3, KX022_MASK_CNTL3_OTP,
-				(KX022_DEFAULT_TILT_ODR << KX022_OTP_SHIFT));
-	k_msleep(50);
-
-	data->hw_tf->write_reg(data, KX022_REG_TILT_TIMER, KX022_TILT_TIMES_DURATION);
-	k_msleep(50);
-
-	data->hw_tf->write_reg(data, KX022_REG_TILT_ANGLE_LL, KX022_DEF_TILT_ANGLE_LL);
-	k_msleep(50);
-	data->hw_tf->write_reg(data, KX022_REG_TILT_ANGLE_HL, KX022_DEF_TILT_ANGLE_HL);
-	k_msleep(50);
-	data->hw_tf->write_reg(data, KX022_REG_HYST_SET, KX022_DEF_HYST_SET);
-	k_msleep(50);
-
-	if (IS_ENABLED(CONFIG_KX022_INT1_PIN)) {
-		data->hw_tf->update_reg(data, KX022_REG_INC4, KX022_MAKS_INC6_TPI2,
-					KX022_INC4_TPI1);
-	} else {
-		data->hw_tf->update_reg(data, KX022_REG_INC6, KX022_MAKS_INC6_TPI2,
-					KX022_INC6_TPI2);
+	if (kx022_mode(dev, KX022_STANDY_MODE) < 0) {
+		return -EIO;
 	}
 
-	k_msleep(100);
+	/* Enable motion detection */
+	ret = data->hw_tf->update_reg(dev, KX022_REG_CNTL1, KX022_MASK_CNTL1_WUFE, KX022_CNTL1_WUFE);
+	if (ret < 0) {
+		LOG_ERR("Failed set motion detect");
+		return -EIO;
+	}
+
+	ret = data->hw_tf->update_reg(dev, KX022_REG_CNTL3, KX022_MASK_CNTL3_OWUF, cfg->motion_odr);
+	if (ret < 0) {
+		LOG_ERR("Failed set motion odr");
+		return -EIO;
+	}
+
+	ret = data->hw_tf->write_reg(dev, KX022_REG_INC2, KX022_DEFAULT_INC2);
+	if (ret< 0) {
+		LOG_ERR("Failed set motion axis");
+		return -EIO;
+	}
+
+	ret = data->hw_tf->write_reg(dev, KX022_REG_WUFC, cfg->motion_detection_timer);
+	if (ret < 0) {
+		LOG_ERR("Failed set motion delay");
+		return -EIO;
+	}
+
+	ret = data->hw_tf->write_reg(dev, KX022_REG_ATH, cfg->motion_threshold);
+	if (ret < 0) {
+		LOG_ERR("Failed set motion ath");
+		return -EIO;
+	}
+
+	ret = data->hw_tf->update_reg(dev, KX022_REG_INC4, KX022_MASK_INC4_WUFI1,
+				    KX022_INC4_WUFI1_SET) ;
+	if (ret < 0) {
+		LOG_ERR("Failed set motion int1");
+		return -EIO;
+	}
+
+	kx022_mode(dev, KX022_OPERATING_MODE);
+
+	return 0;
 }
 
-void kx022_clear_setup(const struct device *dev)
+int kx022_tilt_setup(const struct device *dev, sensor_trigger_handler_t handler)
 {
 	struct kx022_data *data = dev->data;
+	const struct kx022_config *cfg = dev->config;
+	int ret;
 
-	data->hw_tf->write_reg(data, KX022_REG_CNTL1, KX022_DEFAULT_CNTL1);
-	k_msleep(50);
+	data->tilt_handler = handler;
+
+	if (kx022_mode(dev, KX022_STANDY_MODE) < 0) {
+		return -EIO;
+	}
+
+	ret = data->hw_tf->update_reg(dev, KX022_REG_CNTL1, KX022_MASK_CNTL1_TPE,
+				    KX022_CNTL1_TPE_EN);
+	if (ret < 0) {
+		LOG_ERR("Failed set tilt");
+		return -EIO;
+	}
+
+	ret = data->hw_tf->write_reg(dev, KX022_REG_CNTL2, KX022_CNTL_TILT_ALL_EN);
+	if (ret < 0) {
+		LOG_ERR("Failed set tilt axis");
+		return -EIO;
+	}
+
+	ret =  data->hw_tf->update_reg(dev, KX022_REG_CNTL3, KX022_MASK_CNTL3_OTP,
+				    (cfg->tilt_odr << KX022_CNTL3_OTP_SHIFT));
+	if ( ret < 0) {
+		LOG_ERR("Failed set tilt odr");
+		return -EIO;
+	}
+
+	ret = data->hw_tf->write_reg(dev, KX022_REG_TILT_TIMER, cfg->tilt_timer);
+	if (ret < 0) {
+		LOG_ERR("Failed set tilt timer");
+		return -EIO;
+	}
+
+	ret = data->hw_tf->write_reg(dev, KX022_REG_TILT_ANGLE_LL, cfg->tilt_angle_ll);
+	if (ret  < 0) {
+		LOG_ERR("Failed set tilt angle ll");
+		return -EIO;
+	}
+
+	ret = data->hw_tf->write_reg(dev, KX022_REG_TILT_ANGLE_HL, cfg->tilt_angle_hl);
+	if (ret < 0) {
+		LOG_ERR("Failed set tilt angle hl");
+		return -EIO;
+	}
+
+	ret = data->hw_tf->update_reg(dev, KX022_REG_INC4, KX022_MASK_INC6_TPI2,
+				    KX022_INC4_TPI1_SET);
+	if (ret < 0) {
+		LOG_ERR("Failed set tilt int1");
+		return -EIO;
+	}
+
+	kx022_mode(dev, KX022_OPERATING_MODE);
+
+	return 0;
 }
+
 int kx022_trigger_set(const struct device *dev, const struct sensor_trigger *trig,
 		      sensor_trigger_handler_t handler)
 {
+	int ret;
 	struct kx022_data *data = dev->data;
 	const struct kx022_config *cfg = dev->config;
 	uint8_t buf[6];
 
-	kx022_mode(dev, KX022_STANDY_MODE);
+	switch ((enum sensor_trigger_type_kx022)trig->type) {
+	case SENSOR_TRIG_KX022_MOTION:
+		ret = kx022_motion_setup(dev, handler);
+		break;
 
-	switch (trig->type) {
-	case SENSOR_TRIG_FREEFALL:
-		LOG_WRN("kx022_trigger_set dev name %s\r\n",dev->name);
-		kx022_clear_setup(dev);
-		kx022_motion_setup(dev, handler);
-		kx022_mode(dev, KX022_OPERATING_MODE);
+	case SENSOR_TRIG_KX022_TILT:
+		ret = kx022_tilt_setup(dev, handler);
 		break;
-	case SENSOR_TRIG_DATA_READY:
-		kx022_clear_setup(dev);
-		kx022_drdy_setup(dev, handler);
-		kx022_mode(dev, KX022_OPERATING_MODE);
-		break;
-	case SENSOR_TRIG_ALL:
-		kx022_drdy_setup(dev, handler);
-		kx022_motion_setup(dev, handler);
-		kx022_tilt_setup(dev, handler);
-		kx022_mode(dev, KX022_OPERATING_MODE);
-		break;
-	case SENSOR_TRIG_NEAR_FAR:
-		kx022_clear_setup(dev);
-		kx022_tilt_setup(dev, handler);
-		kx022_mode(dev, KX022_OPERATING_MODE);
-		break;
+
 	default:
 		return -ENOTSUP;
 	}
+
+	if (ret < 0) {
+		return ret;
+	}
+
 	__ASSERT_NO_MSG(trig->type == SENSOR_TRIG_DELTA);
 
-	gpio_pin_interrupt_configure(data->gpio, cfg->irq_pin, GPIO_INT_DISABLE);
+	// if (gpio_pin_interrupt_configure(data->gpio, cfg->irq_pin, GPIO_INT_DISABLE)) {
+	if (gpio_pin_interrupt_configure_dt(&cfg->gpio_int, GPIO_INT_DISABLE)) {
+		LOG_ERR("Failed INT_DISABLE");
+		return -EINVAL;
+	}
 
 	if (handler == NULL) {
 		LOG_WRN("kx022: no handler");
-		return 0;
 	}
 
 	/* re-trigger lost interrupt */
-	if (data->hw_tf->read_data(data, KX022_REG_XOUT_L, buf, sizeof(buf)) < 0) {
+	ret = data->hw_tf->read_data(dev, KX022_REG_XOUT_L, buf, sizeof(buf));
+
+	if (ret < 0) {
 		LOG_ERR("status reading error");
 		return -EIO;
 	}
 
-	gpio_pin_interrupt_configure(data->gpio, cfg->irq_pin, GPIO_INT_EDGE_TO_ACTIVE);
+	if (gpio_pin_interrupt_configure_dt(&cfg->gpio_int, GPIO_INT_EDGE_TO_ACTIVE)) {
+		LOG_ERR("Failed INT_EDGE_TO_ACTIVE");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+int kx022_restore_default_motion_setup(const struct device *dev)
+{
+	struct kx022_data *data = dev->data;
+	int ret;
+
+	if (kx022_mode(dev, KX022_STANDY_MODE) < 0) {
+		return -EIO;
+	}
+
+	/* reset motion detect function*/
+	ret = data->hw_tf->update_reg(dev, KX022_REG_CNTL1, KX022_MASK_CNTL1_WUFE,
+				    KX022_CNTL1_WUFE_RESET);
+
+	if  (ret < 0) {
+		LOG_ERR("Failed to disable motion detect");
+		return -EIO;
+	}
+
+	/* reset motion detect int 1 report */
+	ret = data->hw_tf->update_reg(dev, KX022_REG_INC4, KX022_MASK_INC4_WUFI1,
+				    KX022_INC4_WUFI1_RESET);
+
+	if (ret < 0) {
+		LOG_DBG("Failed to set KX022 int1 report");
+		return -EIO;
+	}
+
+	kx022_mode(dev, KX022_OPERATING_MODE);
+
+	return 0;
+}
+
+int kx022_restore_default_tilt_setup(const struct device *dev)
+{
+	struct kx022_data *data = dev->data;
+	int ret;
+	if (kx022_mode(dev, KX022_STANDY_MODE) < 0) {
+		return -EIO;
+	}
+
+	/* reset the tilt function */
+	ret = data->hw_tf->update_reg(dev, KX022_REG_CNTL1, KX022_MASK_CNTL1_TPE,
+				    KX022_CNTL1_TPE_RESET);
+
+	if (data->hw_tf->update_reg(dev, KX022_REG_CNTL1, KX022_MASK_CNTL1_TPE,
+				    KX022_CNTL1_TPE_RESET) < 0) {
+		LOG_ERR("Failed to disable tilt");
+		return -EIO;
+	}
+
+	/* reset tilt int 1 report */
+	ret = data->hw_tf->update_reg(dev, KX022_REG_INC4, KX022_MASK_INC4_TPI1,
+				    KX022_INC4_TPI1_RESET);
+	if (ret < 0) {
+		LOG_DBG("Failed to set KX022 tilt int1 report");
+		return -EIO;
+	}
+
+	kx022_mode(dev, KX022_OPERATING_MODE);
+
+	return 0;
+}
+
+int kx022_restore_default_trigger_setup(const struct device *dev, const struct sensor_trigger *trig)
+{
+	int ret;
+
+	switch ((enum sensor_trigger_type_kx022)trig->type) {
+	case SENSOR_TRIG_KX022_TILT:
+		ret = kx022_restore_default_tilt_setup(dev);
+		break;
+
+	case SENSOR_TRIG_KX022_MOTION:
+		ret = kx022_restore_default_motion_setup(dev);
+		break;
+
+	default:
+		return -ENOTSUP;
+	}
+
+	if (ret < 0) {
+		return ret;
+	}
 
 	return 0;
 }
