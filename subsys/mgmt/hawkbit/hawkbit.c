@@ -611,7 +611,7 @@ static void hawkbit_dump_deployment(struct hawkbit_dep_res *d)
 int hawkbit_init(void)
 {
 	bool image_ok;
-	int ret = 0, rc = 0;
+	int ret = 0, rc = 0, retry = 0;
 	struct flash_pages_info info;
 	int32_t action_id;
 	const struct device *flash_dev;
@@ -628,8 +628,13 @@ int hawkbit_init(void)
 	fs.sector_size = info.size;
 	fs.sector_count = 3U;
 
+reinit_nvs:
 	rc = nvs_init(&fs, flash_dev->name);
 	if (rc) {
+		if (retry++ < 3) {
+			flash_erase(flash_dev, fs.offset, FLASH_AREA_SIZE(storage));
+			goto reinit_nvs;
+		}
 		LOG_ERR("Storage flash init failed: %d", rc);
 		return -ENODEV;
 	}
