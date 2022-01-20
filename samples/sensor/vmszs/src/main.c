@@ -159,11 +159,11 @@ int main(void)
 		// k_sleep(K_MSEC(2000));
 
 		sht3x();
-		printk("/Sensor test,%.2f,%0.2f,%0.2f/",
+		printk("/*Sensor test,%.2f,%0.2f,%0.2f*/",
 			sensor_value_to_double(&temp)+(toff),
 		       sensor_value_to_double(&hum)+(hoff),
 		       sensor_value_to_double(&val[0])+(soff));
-		k_sleep(K_SECONDS(30));
+		k_sleep(K_MSEC(500));
 	// }
 }
 
