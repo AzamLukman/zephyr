@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021 G-Technologies Sdn. Bhd.
+ * Copyright (c) 2022 G-Technologies Sdn. Bhd.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -7,6 +7,7 @@
 #ifndef MODEM_GSM_PPP_H
 #define MODEM_GSM_PPP_H
 
+#include <zephyr.h>
 #include <device.h>
 #include "modem_context.h"
 #include <drivers/gpio.h>
