@@ -482,6 +482,10 @@ static int uart_stm32_poll_in(const struct device *dev, unsigned char *c)
 		LL_USART_ClearFlag_ORE(UartInstance);
 	}
 
+	/*
+	 * On stm32 F4X, F1X, and F2X, the RXNE flag is affected (cleared) by
+	 * the uart_err_check function call (on errors flags clearing)
+	 */
 	if (!LL_USART_IsActiveFlag_RXNE(UartInstance)) {
 		return -1;
 	}
@@ -495,15 +499,32 @@ static void uart_stm32_poll_out(const struct device *dev,
 					unsigned char c)
 {
 	USART_TypeDef *UartInstance = UART_STRUCT(dev);
+#ifdef CONFIG_PM
+	struct uart_stm32_data *data = DEV_DATA(dev);
+#endif
+	int key;
 
-	/* Wait for TXE flag to be raised */
-	while (!LL_USART_IsActiveFlag_TXE(UartInstance)) {
+	/* Wait for TXE flag to be raised
+	 * When TXE flag is raised, we lock interrupts to prevent interrupts (notably that of usart)
+	 * or thread switch. Then, we can safely send our character. The character sent will be
+	 * interlaced with the characters potentially send with interrupt transmission API
+	 */
+	while (1) {
+		if (LL_USART_IsActiveFlag_TXE(UartInstance)) {
+			key = irq_lock();
+			if (LL_USART_IsActiveFlag_TXE(UartInstance)) {
+				break;
+			}
+			irq_unlock(key);
+		}
 	}
 
 #ifdef CONFIG_PM
-	struct uart_stm32_data *data = DEV_DATA(dev);
 
-	if (!data->tx_poll_stream_on) {
+	/* If an interrupt transmission is in progress, the pm constraint is already managed by the
+	 * call of uart_stm32_irq_tx_[en|dis]able
+	 */
+	if (!data->tx_poll_stream_on && !data->tx_int_stream_on) {
 		data->tx_poll_stream_on = true;
 
 		/* Don't allow system to suspend until stream
@@ -519,6 +540,7 @@ static void uart_stm32_poll_out(const struct device *dev,
 #endif /* CONFIG_PM */
 
 	LL_USART_TransmitData8(UartInstance, (uint8_t)c);
+	irq_unlock(key);
 }
 
 static int uart_stm32_err_check(const struct device *dev)
@@ -526,9 +548,10 @@ static int uart_stm32_err_check(const struct device *dev)
 	USART_TypeDef *UartInstance = UART_STRUCT(dev);
 	uint32_t err = 0U;
 
-	/* Check for errors, but don't clear them here.
+	/* Check for errors, then clear them.
 	 * Some SoC clear all error flags when at least
-	 * one is cleared. (e.g. F4X, F1X, and F2X)
+	 * one is cleared. (e.g. F4X, F1X, and F2X).
+	 * The stm32 F4X, F1X, and F2X also reads the usart DR when clearing Errors
 	 */
 	if (LL_USART_IsActiveFlag_ORE(UartInstance)) {
 		err |= UART_ERROR_OVERRUN;
@@ -542,6 +565,20 @@ static int uart_stm32_err_check(const struct device *dev)
 		err |= UART_ERROR_FRAMING;
 	}
 
+#if !defined(CONFIG_SOC_SERIES_STM32F0X) || defined(USART_LIN_SUPPORT)
+	if (LL_USART_IsActiveFlag_LBD(UartInstance)) {
+		err |= UART_BREAK;
+	}
+
+	if (err & UART_BREAK) {
+		LL_USART_ClearFlag_LBD(UartInstance);
+	}
+#endif
+	/* Clearing error :
+	 * the stm32 F4X, F1X, and F2X sw sequence is reading the usart SR
+	 * then the usart DR to clear the Error flags ORE, PE, FE, NE
+	 * --> so is the RXNE flag also cleared !
+	 */
 	if (err & UART_ERROR_OVERRUN) {
 		LL_USART_ClearFlag_ORE(UartInstance);
 	}
@@ -553,7 +590,6 @@ static int uart_stm32_err_check(const struct device *dev)
 	if (err & UART_ERROR_FRAMING) {
 		LL_USART_ClearFlag_FE(UartInstance);
 	}
-
 	/* Clear noise error as well,
 	 * it is not represented by the errors enum
 	 */
@@ -578,6 +614,14 @@ static int uart_stm32_fifo_fill(const struct device *dev,
 {
 	USART_TypeDef *UartInstance = UART_STRUCT(dev);
 	uint8_t num_tx = 0U;
+	int key;
+
+	if (!LL_USART_IsActiveFlag_TXE(UartInstance)) {
+		return num_tx;
+	}
+
+	/* Lock interrupts to prevent nested interrupts or thread switch */
+	key = irq_lock();
 
 	while ((size - num_tx > 0) &&
 	       LL_USART_IsActiveFlag_TXE(UartInstance)) {
@@ -586,6 +630,8 @@ static int uart_stm32_fifo_fill(const struct device *dev,
 		/* Send a character (8bit , parity none) */
 		LL_USART_TransmitData8(UartInstance, tx_data[num_tx++]);
 	}
+
+	irq_unlock(key);
 
 	return num_tx;
 }
@@ -606,6 +652,10 @@ static int uart_stm32_fifo_read(const struct device *dev, uint8_t *rx_data,
 		/* Clear overrun error flag */
 		if (LL_USART_IsActiveFlag_ORE(UartInstance)) {
 			LL_USART_ClearFlag_ORE(UartInstance);
+		/*
+		 * On stm32 F4X, F1X, and F2X, the RXNE flag is affected (cleared) by
+		 * the uart_err_check function call (on errors flags clearing)
+		 */
 		}
 	}
 
@@ -615,22 +665,43 @@ static int uart_stm32_fifo_read(const struct device *dev, uint8_t *rx_data,
 static void uart_stm32_irq_tx_enable(const struct device *dev)
 {
 	USART_TypeDef *UartInstance = UART_STRUCT(dev);
+#ifdef CONFIG_PM
+	struct uart_stm32_data *data = DEV_DATA(dev);
+	int key;
+#endif
 
+#ifdef CONFIG_PM
+	key = irq_lock();
+	data->tx_poll_stream_on = false;
+	data->tx_int_stream_on = true;
+	uart_stm32_pm_constraint_set(dev);
+#endif
 	LL_USART_EnableIT_TC(UartInstance);
 
 #ifdef CONFIG_PM
-	uart_stm32_pm_constraint_set(dev);
+	irq_unlock(key);
 #endif
 }
 
 static void uart_stm32_irq_tx_disable(const struct device *dev)
 {
 	USART_TypeDef *UartInstance = UART_STRUCT(dev);
+#ifdef CONFIG_PM
+	struct uart_stm32_data *data = DEV_DATA(dev);
+	int key;
+
+	key = irq_lock();
+#endif
 
 	LL_USART_DisableIT_TC(UartInstance);
 
 #ifdef CONFIG_PM
+	data->tx_int_stream_on = false;
 	uart_stm32_pm_constraint_release(dev);
+#endif
+
+#ifdef CONFIG_PM
+	irq_unlock(key);
 #endif
 }
 
@@ -666,7 +737,10 @@ static void uart_stm32_irq_rx_disable(const struct device *dev)
 static int uart_stm32_irq_rx_ready(const struct device *dev)
 {
 	USART_TypeDef *UartInstance = UART_STRUCT(dev);
-
+	/*
+	 * On stm32 F4X, F1X, and F2X, the RXNE flag is affected (cleared) by
+	 * the uart_err_check function call (on errors flags clearing)
+	 */
 	return LL_USART_IsActiveFlag_RXNE(UartInstance);
 }
 
@@ -908,7 +982,7 @@ static void uart_stm32_isr(const struct device *dev)
 			uart_stm32_dma_rx_flush(dev);
 		}
 	} else if (LL_USART_IsEnabledIT_TC(UartInstance) &&
-			  LL_USART_IsActiveFlag_TC(UartInstance)) {
+			LL_USART_IsActiveFlag_TC(UartInstance)) {
 
 		LL_USART_DisableIT_TC(UartInstance);
 		LL_USART_ClearFlag_TC(UartInstance);
@@ -918,6 +992,15 @@ static void uart_stm32_isr(const struct device *dev)
 #ifdef CONFIG_PM
 		uart_stm32_pm_constraint_release(dev);
 #endif
+	} else if (LL_USART_IsEnabledIT_RXNE(UartInstance) &&
+			LL_USART_IsActiveFlag_RXNE(UartInstance)) {
+#ifdef USART_SR_RXNE
+		/* clear the RXNE flag, because Rx data was not read */
+		LL_USART_ClearFlag_RXNE(UartInstance);
+#else
+		/* clear the RXNE by flushing the fifo, because Rx data was not read */
+		LL_USART_RequestRxDataFlush(UartInstance);
+#endif /* USART_SR_RXNE */
 	}
 
 	/* Clear errors */
@@ -998,6 +1081,9 @@ static int uart_stm32_async_rx_disable(const struct device *dev)
 
 	data->rx_next_buffer = NULL;
 	data->rx_next_buffer_len = 0;
+
+	/* When async rx is disabled, enable interruptable instance of uart to function normally*/
+	LL_USART_EnableIT_RXNE(UartInstance);
 
 	LOG_DBG("rx: disabled");
 
@@ -1629,7 +1715,7 @@ DEVICE_DT_INST_DEFINE(index,						\
 		    &uart_stm32_init,					\
 		    NULL,						\
 		    &uart_stm32_data_##index, &uart_stm32_cfg_##index,	\
-		    PRE_KERNEL_1, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,	\
+		    PRE_KERNEL_1, CONFIG_SERIAL_INIT_PRIORITY,		\
 		    &uart_stm32_driver_api);				\
 									\
 STM32_UART_IRQ_HANDLER(index)

@@ -137,7 +137,8 @@ void ull_scan_aux_setup(memq_link_t *link, struct node_rx_hdr *rx)
 			 */
 			lll_aux = ftr->param;
 			aux = HDR_LLL2ULL(lll_aux);
-			/* FIXME: pick the aux somehow */
+
+			/* aux parent will be NULL for periodic sync */
 			lll = aux->parent;
 		} else if (ull_scan_is_valid_get(HDR_LLL2ULL(ftr->param))) {
 			/* Node that does not have valid aux context but has
@@ -157,6 +158,7 @@ void ull_scan_aux_setup(memq_link_t *link, struct node_rx_hdr *rx)
 			 */
 			lll = NULL;
 			sync_lll = ftr->param;
+
 			lll_aux = sync_lll->lll_aux;
 			aux = HDR_LLL2ULL(lll_aux);
 		}
@@ -340,7 +342,11 @@ void ull_scan_aux_setup(memq_link_t *link, struct node_rx_hdr *rx)
 		ull_sync_chm_update(rx->handle, ptr, acad_len);
 	}
 
-	if (!aux_ptr || !aux_ptr->offs ||
+	/* Do not ULL schedule auxiliary PDU reception if no aux pointer
+	 * or aux pointer is zero or scannable advertising has erroneous aux
+	 * pointer being present or PHY in the aux pointer is invalid.
+	 */
+	if (!aux_ptr || !aux_ptr->offs || is_scan_req ||
 	    (aux_ptr->phy > EXT_ADV_AUX_PHY_LE_CODED)) {
 		if (is_scan_req) {
 			LL_ASSERT(aux && aux->rx_last);
@@ -362,6 +368,7 @@ void ull_scan_aux_setup(memq_link_t *link, struct node_rx_hdr *rx)
 
 		aux->rx_head = aux->rx_last = NULL;
 		lll_aux = &aux->lll;
+		lll_aux->is_chain_sched = 0U;
 
 		ull_hdr_init(&aux->ull);
 		lll_hdr_init(lll_aux, aux);
@@ -405,6 +412,10 @@ void ull_scan_aux_setup(memq_link_t *link, struct node_rx_hdr *rx)
 		} else {
 			lll->lll_aux = lll_aux;
 		}
+
+		/* Reset auxiliary channel PDU scan state which otherwise is
+		 * done in the prepare_cb when ULL scheduling is used.
+		 */
 		lll_aux->state = 0U;
 
 		return;
@@ -522,8 +533,6 @@ ull_scan_aux_rx_flush:
 	if (aux) {
 		struct ull_hdr *hdr;
 
-		hdr = &aux->ull;
-
 		/* Enqueue last rx in aux context if possible, otherwise send
 		 * immediately since we are in sync context.
 		 */
@@ -544,6 +553,7 @@ ull_scan_aux_rx_flush:
 		 * callback. Flushing here would release aux context and thus
 		 * ull_hdr before done event was processed.
 		 */
+		hdr = &aux->ull;
 		LL_ASSERT(ull_ref_get(hdr) < 2);
 		if (ull_ref_get(hdr) == 0) {
 			flush(aux);
@@ -658,7 +668,12 @@ void ull_scan_aux_release(memq_link_t *link, struct node_rx_hdr *rx)
 		 * data properly.
 		 */
 		rx->type = NODE_RX_TYPE_SYNC_REPORT;
-		rx->handle = ull_sync_handle_get(HDR_LLL2ULL(lll));
+		rx->handle = ull_sync_handle_get(param_ull);
+
+		/* Dequeue will try releasing list of node rx, set the extra
+		 * pointer to NULL.
+		 */
+		rx->rx_ftr.extra = NULL;
 #endif /* CONFIG_BT_CTLR_SYNC_PERIODIC */
 	} else {
 		LL_ASSERT(0);
@@ -673,6 +688,7 @@ void ull_scan_aux_release(memq_link_t *link, struct node_rx_hdr *rx)
 		hdr = &aux->ull;
 
 		LL_ASSERT(ull_ref_get(hdr) < 2);
+
 		/* Flush from here of from done event, if one is pending */
 		if (ull_ref_get(hdr) == 0) {
 			flush(aux);

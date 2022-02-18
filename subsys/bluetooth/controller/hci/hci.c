@@ -47,6 +47,7 @@
 #include "ll_sw/ull_adv_types.h"
 #include "ll_sw/ull_scan_types.h"
 #include "ll_sw/ull_sync_types.h"
+#include "ll_sw/ull_sync_internal.h"
 #include "ll_sw/ull_conn_types.h"
 #include "ll_sw/ull_conn_internal.h"
 #include "ll_sw/ull_conn_iso_types.h"
@@ -852,7 +853,7 @@ static void read_bd_addr(struct net_buf *buf, struct net_buf **evt)
 
 	rp->status = 0x00;
 
-	ll_addr_get(0, &rp->bdaddr.val[0]);
+	(void)ll_addr_read(0, &rp->bdaddr.val[0]);
 }
 
 #if defined(CONFIG_BT_CTLR_HCI_CODEC_AND_DELAY_INFO)
@@ -2641,7 +2642,7 @@ static void le_df_connectionless_iq_report(struct pdu_data *pdu_rx,
 {
 	struct bt_hci_evt_le_connectionless_iq_report *sep;
 	struct node_rx_iq_report *iq_report;
-
+	struct ll_sync_set *sync;
 	struct lll_sync *lll;
 	uint8_t samples_cnt;
 	int16_t iq_tmp;
@@ -2679,7 +2680,12 @@ static void le_df_connectionless_iq_report(struct pdu_data *pdu_rx,
 
 	rssi = RSSI_DBM_TO_DECI_DBM(iq_report->hdr.rx_ftr.rssi);
 
-	sep->sync_handle = sys_cpu_to_le16(iq_report->hdr.handle);
+	/* Get the sync handle corresponding to the LLL context passed in the
+	 * node rx footer field.
+	 */
+	sync = HDR_LLL2ULL(lll);
+
+	sep->sync_handle = sys_cpu_to_le16(ull_sync_handle_get(sync));
 	sep->rssi = sys_cpu_to_le16(rssi);
 	sep->rssi_ant_id = iq_report->rssi_ant_id;
 	sep->cte_type = iq_report->cte_info.type;
@@ -3278,17 +3284,26 @@ static void le_per_adv_create_sync(struct net_buf *buf, struct net_buf **evt)
 	uint8_t status;
 	uint16_t skip;
 
-	if (adv_cmds_ext_check(evt)) {
+	if (adv_cmds_ext_check(NULL)) {
+		*evt = cmd_status(BT_HCI_ERR_CMD_DISALLOWED);
 		return;
 	}
+
 
 	skip = sys_le16_to_cpu(cmd->skip);
 	sync_timeout = sys_le16_to_cpu(cmd->sync_timeout);
 
-	status = ll_sync_create(cmd->options, cmd->sid, cmd->addr.type,
-				cmd->addr.a.val, skip, sync_timeout,
-				cmd->cte_type);
-
+#if defined(CONFIG_BT_CTLR_SYNC_PERIODIC_CTE_TYPE_FILTERING)
+	if ((cmd->cte_type & BT_HCI_LE_PER_ADV_CREATE_SYNC_CTE_TYPE_INVALID_VALUE) != 0) {
+		status = BT_HCI_ERR_CMD_DISALLOWED;
+#else
+	if (cmd->cte_type != BT_HCI_LE_PER_ADV_CREATE_SYNC_CTE_TYPE_NO_FILTERING) {
+		status = BT_HCI_ERR_INVALID_PARAM;
+#endif /* CONFIG_BT_CTLR_SYNC_PERIODIC_CTE_TYPE_FILTERING */
+	} else {
+		status = ll_sync_create(cmd->options, cmd->sid, cmd->addr.type, cmd->addr.a.val,
+					skip, sync_timeout, cmd->cte_type);
+	}
 	*evt = cmd_status(status);
 }
 
@@ -3333,6 +3348,10 @@ static void le_per_adv_recv_enable(struct net_buf *buf, struct net_buf **evt)
 	struct bt_hci_evt_cc_status *ccst;
 	uint16_t handle;
 	uint8_t status;
+
+	if (adv_cmds_ext_check(evt)) {
+		return;
+	}
 
 	handle = sys_le16_to_cpu(cmd->handle);
 
@@ -5497,7 +5516,7 @@ static void le_per_adv_sync_established(struct pdu_data *pdu_data,
 	sep->status = se->status;
 	sep->handle = sys_cpu_to_le16(node_rx->hdr.handle);
 
-	if (sep->status) {
+	if (sep->status != BT_HCI_ERR_SUCCESS && sep->status != BT_HCI_ERR_UNSUPP_REMOTE_FEATURE) {
 		return;
 	}
 
