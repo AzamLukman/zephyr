@@ -849,7 +849,9 @@ static int tls_mbedtls_handshake(struct tls_context *context, bool block)
 
 	while ((ret = mbedtls_ssl_handshake(&context->ssl)) != 0) {
 		if (ret == MBEDTLS_ERR_SSL_WANT_READ ||
-		    ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
+		    ret == MBEDTLS_ERR_SSL_WANT_WRITE ||
+		    ret == MBEDTLS_ERR_SSL_ASYNC_IN_PROGRESS ||
+		    ret == MBEDTLS_ERR_SSL_CRYPTO_IN_PROGRESS) {
 			if (block) {
 				continue;
 			}
@@ -876,9 +878,20 @@ static int tls_mbedtls_handshake(struct tls_context *context, bool block)
 				ret = -ETIMEDOUT;
 				break;
 			}
+		} else {
+			/* MbedTLS API documentation requires session to
+			 * be reset in other error cases
+			 */
+			NET_ERR("TLS handshake error: -%x", -ret);
+			ret = tls_mbedtls_reset(context);
+			if (ret == 0) {
+				ret = -ECONNABORTED;
+				break;
+			}
 		}
 
-		NET_ERR("TLS handshake error: -%x", -ret);
+		/* Avoid constant loop if tls_mbedtls_reset fails */
+		NET_ERR("TLS reset error: -%x", -ret);
 		ret = -ECONNABORTED;
 		break;
 	}
@@ -1673,6 +1686,10 @@ ssize_t ztls_sendmsg_ctx(struct tls_context *ctx, const struct msghdr *msg,
 			struct iovec *vec = msg->msg_iov + i;
 			size_t sent = 0;
 
+			if (vec->iov_len == 0) {
+				continue;
+			}
+
 			while (sent < vec->iov_len) {
 				uint8_t *ptr = (uint8_t *)vec->iov_base + sent;
 
@@ -2093,7 +2110,7 @@ static int ztls_poll_update_pollin(int fd, struct tls_context *ctx,
 	}
 
 	ret = ztls_socket_data_check(ctx);
-	if (ret == -ENOTCONN) {
+	if (ret == -ENOTCONN || (pfd->revents & ZSOCK_POLLHUP)) {
 		/* Datagram does not return 0 on consecutive recv, but an error
 		 * code, hence clear POLLIN.
 		 */
