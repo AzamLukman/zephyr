@@ -354,9 +354,6 @@ struct mqtt_sec_config {
 	 *  May be NULL to skip hostname verification.
 	 */
 	const char *hostname;
-
-	/** Indicates the preference for copying certificates to the heap. */
-	int cert_nocopy;
 };
 
 /** @brief MQTT transport type. */

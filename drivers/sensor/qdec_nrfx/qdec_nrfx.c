@@ -207,11 +207,9 @@ static int qdec_nrfx_init(const struct device *dev)
 }
 
 #ifdef CONFIG_PM_DEVICE
-static int qdec_nrfx_pm_control(const struct device *dev,
+static int qdec_nrfx_pm_control(struct qdec_nrfx_data *data,
 				enum pm_device_action action)
 {
-	ARG_UNUSED(dev);
-
 	switch (action) {
 	case PM_DEVICE_ACTION_RESUME:
 		qdec_nrfx_gpio_ctrl(true);

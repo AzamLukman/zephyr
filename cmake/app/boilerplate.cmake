@@ -489,7 +489,10 @@ zephyr_boilerplate_watch(CONF_FILE)
 
 if(DTC_OVERLAY_FILE)
   # DTC_OVERLAY_FILE has either been specified on the cmake CLI or is already
-  # in the CMakeCache.txt.
+  # in the CMakeCache.txt. This has precedence over the environment
+  # variable DTC_OVERLAY_FILE
+elseif(DEFINED ENV{DTC_OVERLAY_FILE})
+  set(DTC_OVERLAY_FILE $ENV{DTC_OVERLAY_FILE})
 elseif(APP_BOARD_DTS)
   set(DTC_OVERLAY_FILE ${APP_BOARD_DTS})
 elseif(EXISTS          ${APPLICATION_SOURCE_DIR}/${BOARD}.overlay)
@@ -545,14 +548,6 @@ set(SOC_NAME   ${CONFIG_SOC})
 set(SOC_SERIES ${CONFIG_SOC_SERIES})
 set(SOC_TOOLCHAIN_NAME ${CONFIG_SOC_TOOLCHAIN_NAME})
 set(SOC_FAMILY ${CONFIG_SOC_FAMILY})
-
-# For the gen_app_partitions.py to work correctly, we must ensure that
-# all targets exports their compile commands to fetch object files.
-# We enable it unconditionally, as this is also useful for several IDEs
-set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE CACHE BOOL
-    "Export CMake compile commands. Used by gen_app_partitions.py script"
-    FORCE
-)
 
 if("${SOC_SERIES}" STREQUAL "")
   set(SOC_PATH ${SOC_NAME})

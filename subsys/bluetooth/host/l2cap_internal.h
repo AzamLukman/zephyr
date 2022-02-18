@@ -312,7 +312,7 @@ static inline int bt_l2cap_send(struct bt_conn *conn, uint16_t cid,
 }
 
 /* Receive a new L2CAP PDU from a connection */
-void bt_l2cap_recv(struct bt_conn *conn, struct net_buf *buf, bool complete);
+void bt_l2cap_recv(struct bt_conn *conn, struct net_buf *buf);
 
 /* Perform connection parameter update request */
 int bt_l2cap_update_conn_param(struct bt_conn *conn,

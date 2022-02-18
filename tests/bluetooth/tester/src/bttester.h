@@ -228,15 +228,12 @@ struct gap_passkey_confirm_cmd {
 	uint8_t match;
 } __packed;
 
-#define GAP_START_DIRECTED_ADV_HD	BIT(0)
-#define GAP_START_DIRECTED_ADV_OWN_ID	BIT(1)
-#define GAP_START_DIRECTED_ADV_PEER_RPA	BIT(2)
-
 #define GAP_START_DIRECTED_ADV		0x15
 struct gap_start_directed_adv_cmd {
 	uint8_t address_type;
 	uint8_t address[6];
-	uint16_t options;
+	uint8_t high_duty;
+	uint8_t own_id_addr;
 } __packed;
 struct gap_start_directed_adv_rp {
 	uint32_t current_settings;
@@ -374,13 +371,6 @@ struct gap_pairing_consent_req_ev {
 struct gap_bond_lost_ev {
 	uint8_t address_type;
 	uint8_t address[6];
-} __packed;
-
-#define GAP_EV_PAIRING_FAILED		0x8c
-struct gap_bond_pairing_failed_ev {
-	uint8_t address_type;
-	uint8_t address[6];
-	uint8_t reason;
 } __packed;
 
 /* GATT Service */
@@ -749,9 +739,6 @@ struct l2cap_read_supported_commands_rp {
 	uint8_t data[0];
 } __packed;
 
-#define L2CAP_CONNECT_OPT_ECFC		0x01
-#define L2CAP_CONNECT_OPT_HOLD_CREDIT	0x02
-
 #define L2CAP_CONNECT			0x02
 struct l2cap_connect_cmd {
 	uint8_t address_type;
@@ -759,7 +746,7 @@ struct l2cap_connect_cmd {
 	uint16_t psm;
 	uint16_t mtu;
 	uint8_t num;
-	uint8_t options;
+	uint8_t ecfc;
 } __packed;
 struct l2cap_connect_rp {
 	uint8_t num;
@@ -798,20 +785,6 @@ struct l2cap_listen_cmd {
 struct l2cap_accept_connection_cmd {
 	uint8_t chan_id;
 	uint16_t result;
-} __packed;
-
-#define L2CAP_RECONFIGURE		0x07
-struct l2cap_reconfigure_cmd {
-	uint8_t address_type;
-	uint8_t address[6];
-	uint16_t mtu;
-	uint8_t num;
-	uint8_t chan_id[];
-} __packed;
-
-#define L2CAP_CREDITS		0x08
-struct l2cap_credits_cmd {
-	uint8_t chan_id;
 } __packed;
 
 #define L2CAP_DISCONNECT_EATT_CHANS		0x09
@@ -856,15 +829,6 @@ struct l2cap_data_received_ev {
 	uint8_t chan_id;
 	uint16_t data_length;
 	uint8_t data[];
-} __packed;
-
-#define L2CAP_EV_RECONFIGURED		0x84
-struct l2cap_reconfigured_ev {
-	uint8_t chan_id;
-	uint16_t mtu_remote;
-	uint16_t mps_remote;
-	uint16_t mtu_local;
-	uint16_t mps_local;
 } __packed;
 
 /* MESH Service */

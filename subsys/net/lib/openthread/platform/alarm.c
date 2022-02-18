@@ -80,7 +80,8 @@ void otPlatAlarmMilliStartAt(otInstance *aInstance, uint32_t aT0, uint32_t aDt)
 {
 	ARG_UNUSED(aInstance);
 
-	int32_t delta = (int32_t)(aT0 + aDt - otPlatAlarmMilliGetNow());
+	int64_t reftime = (int64_t)aT0 + (int64_t)aDt;
+	int64_t delta = -k_uptime_delta(&reftime);
 
 	if (delta > 0) {
 		k_timer_start(&ot_ms_timer, K_MSEC(delta), K_NO_WAIT);
@@ -100,7 +101,9 @@ void otPlatAlarmMicroStartAt(otInstance *aInstance, uint32_t aT0, uint32_t aDt)
 {
 	ARG_UNUSED(aInstance);
 
-	int32_t delta = (int32_t)(aT0 + aDt - otPlatAlarmMicroGetNow());
+	uint64_t reftime = aT0 + aDt;
+	uint64_t curtime = k_ticks_to_us_floor64(k_uptime_ticks());
+	int64_t delta = reftime - curtime;
 
 	if (delta > 0) {
 		k_timer_start(&ot_us_timer, K_USEC(delta), K_NO_WAIT);

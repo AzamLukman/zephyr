@@ -66,13 +66,6 @@ static inline struct net_nbr *get_nexthop_nbr(struct net_nbr *start, int idx)
 			((sizeof(struct net_nbr) + start->size) * idx));
 }
 
-static void release_nexthop_route(struct net_route_nexthop *route_nexthop)
-{
-	struct net_nbr *nbr = CONTAINER_OF(route_nexthop, struct net_nbr, __nbr);
-
-	net_nbr_unref(nbr);
-}
-
 static struct net_nbr *get_nexthop_route(void)
 {
 	int i;
@@ -221,7 +214,7 @@ static struct net_nbr *nbr_nexthop_get(struct net_if *iface,
 
 	NET_ASSERT(nbr->idx != NET_NBR_LLADDR_UNKNOWN,
 		   "Nexthop %s not in neighbor cache!",
-		   net_sprint_ipv6_addr(addr));
+		   log_strdup(net_sprint_ipv6_addr(addr)));
 
 	net_nbr_ref(nbr);
 
@@ -476,7 +469,6 @@ int net_route_del(struct net_route_entry *route)
 		}
 
 		nbr_nexthop_put(nexthop_route->nbr);
-		release_nexthop_route(nexthop_route);
 	}
 
 	nbr_free(nbr);
@@ -629,10 +621,6 @@ int net_route_foreach(net_route_cb_t cb, void *user_data)
 
 		nbr = get_nbr(i);
 		if (!nbr) {
-			continue;
-		}
-
-		if (!nbr->ref) {
 			continue;
 		}
 

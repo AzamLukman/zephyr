@@ -410,10 +410,7 @@ static void sx126x_dio1_irq_work_handler(struct k_work *work)
 		Radio.IrqProcess();
 	}
 
-	/* Re-enable the interrupt if we are not in sleep mode */
-	if (dev_data.mode != MODE_SLEEP) {
-		sx126x_dio1_irq_enable(&dev_data);
-	}
+	sx126x_dio1_irq_enable(&dev_data);
 }
 
 static int sx126x_lora_init(const struct device *dev)

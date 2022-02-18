@@ -1454,14 +1454,14 @@ static void conn_handler_cb(struct net_conn *conn, void *user_data)
 #endif /* CONFIG_NET_CONN_LOG_LEVEL >= LOG_LEVEL_DBG */
 
 #if CONFIG_NET_TCP_LOG_LEVEL >= LOG_LEVEL_DBG
-struct tcp_detail_info {
+struct tcp2_detail_info {
 	int printed_send_queue_header;
 	int printed_details;
 	int count;
 };
 #endif
 
-#if defined(CONFIG_NET_TCP) && \
+#if defined(CONFIG_NET_TCP2) && \
 	(defined(CONFIG_NET_OFFLOAD) || defined(CONFIG_NET_NATIVE))
 static void tcp_cb(struct tcp *conn, void *user_data)
 {
@@ -1485,7 +1485,7 @@ static void tcp_sent_list_cb(struct tcp *conn, void *user_data)
 {
 	struct net_shell_user_data *data = user_data;
 	const struct shell *shell = data->shell;
-	struct tcp_detail_info *details = data->user_data;
+	struct tcp2_detail_info *details = data->user_data;
 	struct net_pkt *pkt;
 	sys_snode_t *node;
 
@@ -1554,7 +1554,7 @@ static void tcp_sent_list_cb(struct tcp *conn, void *user_data)
 	details->printed_send_queue_header = true;
 }
 #endif /* CONFIG_NET_TCP_LOG_LEVEL >= LOG_LEVEL_DBG */
-#endif /* TCP */
+#endif /* TCP2 */
 
 #if defined(CONFIG_NET_IPV6_FRAGMENT)
 static void ipv6_frag_cb(struct net_ipv6_reassembly *reass,
@@ -2040,18 +2040,18 @@ static int cmd_net_conn(const struct shell *shell, size_t argc, char *argv[])
 	} else {
 #if CONFIG_NET_TCP_LOG_LEVEL >= LOG_LEVEL_DBG
 		/* Print information about pending packets */
-		struct tcp_detail_info details;
+		struct tcp2_detail_info details;
 
 		count = 0;
 
-		if (IS_ENABLED(CONFIG_NET_TCP)) {
+		if (IS_ENABLED(CONFIG_NET_TCP2)) {
 			memset(&details, 0, sizeof(details));
 			user_data.user_data = &details;
 		}
 
 		net_tcp_foreach(tcp_sent_list_cb, &user_data);
 
-		if (IS_ENABLED(CONFIG_NET_TCP)) {
+		if (IS_ENABLED(CONFIG_NET_TCP2)) {
 			if (details.count == 0) {
 				PR("No active connections.\n");
 			}
@@ -4102,7 +4102,6 @@ static int parse_arg(size_t *i, size_t argc, char *argv[])
 		str = argv[*i];
 	}
 
-	errno = 0;
 	res = strtol(str, &endptr, 10);
 
 	if (errno || (endptr == str)) {

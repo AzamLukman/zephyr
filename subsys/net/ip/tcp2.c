@@ -24,7 +24,7 @@ LOG_MODULE_REGISTER(net_tcp, CONFIG_NET_TCP_LOG_LEVEL);
 #include "connection.h"
 #include "net_stats.h"
 #include "net_private.h"
-#include "tcp_internal.h"
+#include "tcp2_priv.h"
 
 #define ACK_TIMEOUT_MS CONFIG_NET_TCP_ACK_TIMEOUT
 #define ACK_TIMEOUT K_MSEC(ACK_TIMEOUT_MS)
@@ -377,14 +377,14 @@ static int tcp_conn_unref(struct tcp *conn)
 	}
 #endif /* CONFIG_NET_TEST_PROTOCOL */
 
+	k_mutex_lock(&tcp_lock, K_FOREVER);
+
 	ref_count = atomic_dec(&conn->ref_count) - 1;
-	if (ref_count != 0) {
+	if (ref_count) {
 		tp_out(net_context_get_family(conn->context), conn->iface,
 		       "TP_TRACE", "event", "CONN_DELETE");
-		return ref_count;
+		goto unlock;
 	}
-
-	k_mutex_lock(&tcp_lock, K_FOREVER);
 
 	/* If there is any pending data, pass that to application */
 	while ((pkt = k_fifo_get(&conn->recv_data, K_NO_WAIT)) != NULL) {
@@ -429,6 +429,7 @@ static int tcp_conn_unref(struct tcp *conn)
 
 	k_mem_slab_free(&tcp_conns_slab, (void **)&conn);
 
+unlock:
 	k_mutex_unlock(&tcp_lock);
 out:
 	return ref_count;
@@ -619,9 +620,9 @@ static bool tcp_options_check(struct tcp_options *recv_options,
 	for ( ; options && len >= 1; options += opt_len, len -= opt_len) {
 		opt = options[0];
 
-		if (opt == NET_TCP_END_OPT) {
+		if (opt == TCPOPT_END) {
 			break;
-		} else if (opt == NET_TCP_NOP_OPT) {
+		} else if (opt == TCPOPT_NOP) {
 			opt_len = 1;
 			continue;
 		} else {
@@ -633,9 +634,7 @@ static bool tcp_options_check(struct tcp_options *recv_options,
 			}
 			opt_len = options[1];
 		}
-
-		NET_DBG("opt: %hu, opt_len: %hu",
-			(uint16_t)opt, (uint16_t)opt_len);
+		NET_DBG("opt: %hu, opt_len: %hu", (uint16_t)opt, (uint16_t)opt_len);
 
 		if (opt_len < 2 || opt_len > len) {
 			result = false;
@@ -643,7 +642,7 @@ static bool tcp_options_check(struct tcp_options *recv_options,
 		}
 
 		switch (opt) {
-		case NET_TCP_MSS_OPT:
+		case TCPOPT_MAXSEG:
 			if (opt_len != 4) {
 				result = false;
 				goto end;
@@ -654,7 +653,7 @@ static bool tcp_options_check(struct tcp_options *recv_options,
 			recv_options->mss_found = true;
 			NET_DBG("MSS=%hu", recv_options->mss);
 			break;
-		case NET_TCP_WINDOW_SCALE_OPT:
+		case TCPOPT_WINDOW:
 			if (opt_len != 3) {
 				result = false;
 				goto end;
@@ -773,11 +772,6 @@ static int tcp_header_add(struct tcp *conn, struct net_pkt *pkt, uint8_t flags,
 	UNALIGNED_PUT(conn->src.sin.sin_port, &th->th_sport);
 	UNALIGNED_PUT(conn->dst.sin.sin_port, &th->th_dport);
 	th->th_off = 5;
-
-	if (conn->send_options.mss_found) {
-		th->th_off++;
-	}
-
 	UNALIGNED_PUT(flags, &th->th_flags);
 	UNALIGNED_PUT(htons(conn->recv_win), &th->th_win);
 	UNALIGNED_PUT(htonl(seq), &th->th_seq);
@@ -806,56 +800,13 @@ static int ip_header_add(struct tcp *conn, struct net_pkt *pkt)
 	return -EINVAL;
 }
 
-static int net_tcp_set_mss_opt(struct tcp *conn, struct net_pkt *pkt)
-{
-	NET_PKT_DATA_ACCESS_DEFINE(mss_opt_access, struct tcp_mss_option);
-	struct tcp_mss_option *mss;
-	uint32_t recv_mss;
-
-	mss = net_pkt_get_data(pkt, &mss_opt_access);
-	if (!mss) {
-		return -ENOBUFS;
-	}
-
-	recv_mss = net_tcp_get_recv_mss(conn);
-	recv_mss |= (NET_TCP_MSS_OPT << 24) | (NET_TCP_MSS_SIZE << 16);
-
-	UNALIGNED_PUT(htonl(recv_mss), (uint32_t *)mss);
-
-	return net_pkt_set_data(pkt, &mss_opt_access);
-}
-
-static bool is_destination_local(struct net_pkt *pkt)
-{
-	if (IS_ENABLED(CONFIG_NET_IPV4) && net_pkt_family(pkt) == AF_INET) {
-		if (net_ipv4_is_addr_loopback(&NET_IPV4_HDR(pkt)->dst) ||
-		    net_ipv4_is_my_addr(&NET_IPV4_HDR(pkt)->dst)) {
-			return true;
-		}
-	}
-
-	if (IS_ENABLED(CONFIG_NET_IPV6) && net_pkt_family(pkt) == AF_INET6) {
-		if (net_ipv6_is_addr_loopback(&NET_IPV6_HDR(pkt)->dst) ||
-		    net_ipv6_is_my_addr(&NET_IPV6_HDR(pkt)->dst)) {
-			return true;
-		}
-	}
-
-	return false;
-}
-
 static int tcp_out_ext(struct tcp *conn, uint8_t flags, struct net_pkt *data,
 		       uint32_t seq)
 {
-	size_t alloc_len = sizeof(struct tcphdr);
 	struct net_pkt *pkt;
 	int ret = 0;
 
-	if (conn->send_options.mss_found) {
-		alloc_len += sizeof(uint32_t);
-	}
-
-	pkt = tcp_pkt_alloc(conn, alloc_len);
+	pkt = tcp_pkt_alloc(conn, sizeof(struct tcphdr));
 	if (!pkt) {
 		ret = -ENOBUFS;
 		goto out;
@@ -879,14 +830,6 @@ static int tcp_out_ext(struct tcp *conn, uint8_t flags, struct net_pkt *data,
 		goto out;
 	}
 
-	if (conn->send_options.mss_found) {
-		ret = net_tcp_set_mss_opt(conn, pkt);
-		if (ret < 0) {
-			tcp_pkt_unref(pkt);
-			goto out;
-		}
-	}
-
 	ret = tcp_finalize_pkt(pkt);
 	if (ret < 0) {
 		tcp_pkt_unref(pkt);
@@ -902,14 +845,7 @@ static int tcp_out_ext(struct tcp *conn, uint8_t flags, struct net_pkt *data,
 
 	sys_slist_append(&conn->send_queue, &pkt->next);
 
-	if (is_destination_local(pkt)) {
-		/* If the destination is local, we have to let the current
-		 * thread to finish with any state-machine changes before
-		 * sending the packet, or it might lead to state unconsistencies
-		 */
-		k_work_schedule_for_queue(&tcp_work_q,
-					  &conn->send_timer, K_NO_WAIT);
-	} else if (tcp_send_process_no_lock(conn)) {
+	if (tcp_send_process_no_lock(conn)) {
 		tcp_conn_unref(conn);
 	}
 out:
@@ -1047,6 +983,7 @@ static int tcp_send_queued_data(struct tcp *conn)
 	}
 
 	while (tcp_unsent_len(conn) > 0) {
+
 		if (tcp_window_full(conn)) {
 			subscribe = true;
 			break;
@@ -1128,14 +1065,13 @@ static void tcp_resend_data(struct k_work *work)
 			NET_DBG("TCP connection in active close, "
 				"not disposing yet (waiting %dms)",
 				FIN_TIMEOUT_MS);
-			k_work_reschedule_for_queue(&tcp_work_q,
-						    &conn->fin_timer,
-						    FIN_TIMEOUT);
+			k_work_reschedule_for_queue(
+				&tcp_work_q, &conn->fin_timer, FIN_TIMEOUT);
 
 			conn_state(conn, TCP_FIN_WAIT_1);
 
 			ret = tcp_out_ext(conn, FIN | ACK, NULL,
-					  conn->seq + conn->unacked_len);
+				    conn->seq + conn->unacked_len);
 			if (ret == 0) {
 				conn_seq(conn, + 1);
 			}
@@ -1315,6 +1251,7 @@ static struct tcp *tcp_conn_search(struct net_pkt *pkt)
 	struct tcp *tmp;
 
 	SYS_SLIST_FOR_EACH_CONTAINER_SAFE(&tcp_conns, conn, tmp, next) {
+
 		found = tcp_conn_cmp(conn, pkt);
 		if (found) {
 			break;
@@ -1778,11 +1715,8 @@ next_state:
 	switch (conn->state) {
 	case TCP_LISTEN:
 		if (FL(&fl, ==, SYN)) {
-			/* Make sure our MSS is also sent in the ACK */
-			conn->send_options.mss_found = true;
 			conn_ack(conn, th_seq(th) + 1); /* capture peer's isn */
 			tcp_out(conn, SYN | ACK);
-			conn->send_options.mss_found = false;
 			conn_seq(conn, + 1);
 			next = TCP_SYN_RECEIVED;
 
@@ -1792,9 +1726,7 @@ next_state:
 						    &conn->establish_timer,
 						    ACK_TIMEOUT);
 		} else {
-			conn->send_options.mss_found = true;
 			tcp_out(conn, SYN);
-			conn->send_options.mss_found = false;
 			conn_seq(conn, + 1);
 			next = TCP_SYN_SENT;
 		}
@@ -1999,8 +1931,7 @@ next_state:
 	case TCP_FIN_WAIT_2:
 		if (th && (FL(&fl, ==, FIN, th_seq(th) == conn->ack) ||
 			   FL(&fl, ==, FIN | ACK, th_seq(th) == conn->ack) ||
-			   FL(&fl, ==, FIN | PSH | ACK,
-			      th_seq(th) == conn->ack))) {
+			   FL(&fl, ==, FIN | PSH | ACK, th_seq(th) == conn->ack))) {
 			/* Received FIN on FIN_WAIT_2, so cancel the timer */
 			k_work_cancel_delayable(&conn->fin_timer);
 
@@ -2107,12 +2038,11 @@ int net_tcp_put(struct net_context *context)
 
 			NET_DBG("TCP connection in active close, not "
 				"disposing yet (waiting %dms)", FIN_TIMEOUT_MS);
-			k_work_reschedule_for_queue(&tcp_work_q,
-						    &conn->fin_timer,
-						    FIN_TIMEOUT);
+			k_work_reschedule_for_queue(
+				&tcp_work_q, &conn->fin_timer, FIN_TIMEOUT);
 
 			ret = tcp_out_ext(conn, FIN | ACK, NULL,
-					  conn->seq + conn->unacked_len);
+				    conn->seq + conn->unacked_len);
 			if (ret == 0) {
 				conn_seq(conn, + 1);
 			}
@@ -2187,9 +2117,9 @@ int net_tcp_queue_data(struct net_context *context, struct net_pkt *pkt)
 		 * conn is embedded, and calling that function directly here
 		 * and in the work handler.
 		 */
-		(void)k_work_schedule_for_queue(&tcp_work_q,
-						&conn->send_data_timer,
-						K_NO_WAIT);
+		(void)k_work_schedule_for_queue(
+			&tcp_work_q, &conn->send_data_timer, K_NO_WAIT);
+
 		ret = -EAGAIN;
 		goto out;
 	}
@@ -2483,8 +2413,8 @@ struct net_tcp_hdr *net_tcp_input(struct net_pkt *pkt,
 	struct net_tcp_hdr *tcp_hdr;
 
 	if (IS_ENABLED(CONFIG_NET_TCP_CHECKSUM) &&
-	    net_if_need_calc_rx_checksum(net_pkt_iface(pkt)) &&
-	    net_calc_chksum_tcp(pkt) != 0U) {
+			net_if_need_calc_rx_checksum(net_pkt_iface(pkt)) &&
+			net_calc_chksum_tcp(pkt) != 0U) {
 		NET_DBG("DROP: checksum mismatch");
 		goto drop;
 	}
@@ -2817,7 +2747,7 @@ const char *net_tcp_state_str(enum tcp_state state)
 void net_tcp_init(void)
 {
 #if defined(CONFIG_NET_TEST_PROTOCOL)
-	/* Register inputs for TTCN-3 based TCP sanity check */
+	/* Register inputs for TTCN-3 based TCP2 sanity check */
 	test_cb_register(AF_INET,  IPPROTO_TCP, 4242, 4242, tcp_input);
 	test_cb_register(AF_INET6, IPPROTO_TCP, 4242, 4242, tcp_input);
 	test_cb_register(AF_INET,  IPPROTO_UDP, 4242, 4242, tp_input);
@@ -2827,9 +2757,10 @@ void net_tcp_init(void)
 #endif
 
 #if IS_ENABLED(CONFIG_NET_TC_THREAD_COOPERATIVE)
-#define THREAD_PRIORITY K_PRIO_COOP(0)
+/* Lowest priority cooperative thread */
+#define THREAD_PRIORITY K_PRIO_COOP(CONFIG_NUM_COOP_PRIORITIES - 1)
 #else
-#define THREAD_PRIORITY K_PRIO_PREEMPT(0)
+#define THREAD_PRIORITY K_PRIO_PREEMPT(CONFIG_NUM_PREEMPT_PRIORITIES - 1)
 #endif
 
 	/* Use private workqueue in order not to block the system work queue.

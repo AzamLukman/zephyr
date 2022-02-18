@@ -66,9 +66,9 @@ int pm_low_power_devices(void)
 
 void pm_resume_devices(void)
 {
-	int32_t i;
+	size_t i;
 
-	for (i = (num_susp - 1); i >= 0; i--) {
+	for (i = 0; i < num_susp; i++) {
 		pm_device_state_set(__pm_device_slots_start[i],
 				    PM_DEVICE_STATE_ACTIVE);
 	}

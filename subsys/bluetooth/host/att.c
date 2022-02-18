@@ -251,7 +251,6 @@ static int chan_req_send(struct bt_att_chan *chan, struct bt_att_req *req)
 	if (err) {
 		/* We still have the ownership of the buffer */
 		req->buf = buf;
-		chan->req = NULL;
 	}
 
 	return err;
@@ -1954,14 +1953,6 @@ static uint8_t att_signed_write_cmd(struct bt_att_chan *chan, struct net_buf *bu
 	uint16_t handle;
 	int err;
 
-	/* The Signed Write Without Response sub-procedure shall only be supported
-	 * on the LE Fixed Channel Unenhanced ATT bearer.
-	 */
-	if (atomic_test_bit(chan->flags, ATT_ENHANCED)) {
-		/* No response for this command */
-		return 0;
-	}
-
 	req = (void *)buf->data;
 
 	handle = sys_le16_to_cpu(req->handle);
@@ -2441,8 +2432,7 @@ static int bt_att_recv(struct bt_l2cap_chan *chan, struct net_buf *buf)
 
 	if (!handler) {
 		BT_WARN("Unhandled ATT code 0x%02x", hdr->code);
-		if (att_op_get_type(hdr->code) != ATT_COMMAND &&
-		    att_op_get_type(hdr->code) != ATT_INDICATION) {
+		if (att_op_get_type(hdr->code) != ATT_COMMAND) {
 			send_err_rsp(att_chan, hdr->code, 0,
 				     BT_ATT_ERR_NOT_SUPPORTED);
 		}
@@ -2527,6 +2517,7 @@ struct net_buf *bt_att_create_pdu(struct bt_conn *conn, uint8_t op, size_t len)
 
 static void att_reset(struct bt_att *att)
 {
+	struct bt_att_req *req, *tmp;
 	struct net_buf *buf;
 
 #if CONFIG_BT_ATT_PREPARE_COUNT > 0
@@ -2543,12 +2534,7 @@ static void att_reset(struct bt_att *att)
 	att->conn = NULL;
 
 	/* Notify pending requests */
-	while (!sys_slist_is_empty(&att->reqs)) {
-		struct bt_att_req *req;
-		sys_snode_t *node;
-
-		node = sys_slist_get_not_empty(&att->reqs);
-		req = CONTAINER_OF(node, struct bt_att_req, node);
+	SYS_SLIST_FOR_EACH_CONTAINER_SAFE(&att->reqs, req, tmp, node) {
 		if (req->func) {
 			req->func(NULL, BT_ATT_ERR_UNLIKELY, NULL, 0,
 				  req->user_data);

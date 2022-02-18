@@ -264,8 +264,8 @@ static int on_body(struct http_parser *parser, const char *at, size_t length)
 		req->internal.response.http_cb->on_body(parser, at, length);
 	}
 
-	/* Reset the body_start pointer for each fragment. */
-	if (!req->internal.response.body_start) {
+	if (!req->internal.response.body_start &&
+	    (uint8_t *)at != (uint8_t *)req->internal.response.recv_buf) {
 		req->internal.response.body_start = (uint8_t *)at;
 	}
 

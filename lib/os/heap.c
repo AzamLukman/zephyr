@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <sys/sys_heap.h>
-#include <sys/util.h>
 #include <kernel.h>
 #include <string.h>
 #include "heap.h"
@@ -25,11 +24,11 @@ static void free_list_remove_bidx(struct z_heap *h, chunkid_t c, int bidx)
 
 	CHECK(!chunk_used(h, c));
 	CHECK(b->next != 0);
-	CHECK(h->avail_buckets & BIT(bidx));
+	CHECK(h->avail_buckets & (1 << bidx));
 
 	if (next_free_chunk(h, c) == c) {
 		/* this is the last chunk */
-		h->avail_buckets &= ~BIT(bidx);
+		h->avail_buckets &= ~(1 << bidx);
 		b->next = 0;
 	} else {
 		chunkid_t first = prev_free_chunk(h, c),
@@ -39,10 +38,6 @@ static void free_list_remove_bidx(struct z_heap *h, chunkid_t c, int bidx)
 		set_next_free_chunk(h, first, second);
 		set_prev_free_chunk(h, second, first);
 	}
-
-#ifdef CONFIG_SYS_HEAP_RUNTIME_STATS
-	h->free_bytes -= chunksz_to_bytes(h, chunk_size(h, c));
-#endif
 }
 
 static void free_list_remove(struct z_heap *h, chunkid_t c)
@@ -58,15 +53,15 @@ static void free_list_add_bidx(struct z_heap *h, chunkid_t c, int bidx)
 	struct z_heap_bucket *b = &h->buckets[bidx];
 
 	if (b->next == 0U) {
-		CHECK((h->avail_buckets & BIT(bidx)) == 0);
+		CHECK((h->avail_buckets & (1 << bidx)) == 0);
 
 		/* Empty list, first item */
-		h->avail_buckets |= BIT(bidx);
+		h->avail_buckets |= (1 << bidx);
 		b->next = c;
 		set_prev_free_chunk(h, c, c);
 		set_next_free_chunk(h, c, c);
 	} else {
-		CHECK(h->avail_buckets & BIT(bidx));
+		CHECK(h->avail_buckets & (1 << bidx));
 
 		/* Insert before (!) the "next" pointer */
 		chunkid_t second = b->next;
@@ -77,10 +72,6 @@ static void free_list_add_bidx(struct z_heap *h, chunkid_t c, int bidx)
 		set_next_free_chunk(h, first, c);
 		set_prev_free_chunk(h, second, c);
 	}
-
-#ifdef CONFIG_SYS_HEAP_RUNTIME_STATS
-	h->free_bytes += chunksz_to_bytes(h, chunk_size(h, c));
-#endif
 }
 
 static void free_list_add(struct z_heap *h, chunkid_t c)
@@ -173,9 +164,6 @@ void sys_heap_free(struct sys_heap *heap, void *mem)
 		 mem);
 
 	set_chunk_used(h, c, false);
-#ifdef CONFIG_SYS_HEAP_RUNTIME_STATS
-	h->allocated_bytes -= chunksz_to_bytes(h, chunk_size(h, c));
-#endif
 	free_chunk(h, c);
 }
 
@@ -217,7 +205,7 @@ static chunkid_t alloc_chunk(struct z_heap *h, chunksz_t sz)
 	/* Otherwise pick the smallest non-empty bucket guaranteed to
 	 * fit and use that unconditionally.
 	 */
-	uint32_t bmask = h->avail_buckets & ~BIT_MASK(bi + 1);
+	uint32_t bmask = h->avail_buckets & ~((1 << (bi + 1)) - 1);
 
 	if (bmask != 0U) {
 		int minbucket = __builtin_ctz(bmask);
@@ -252,9 +240,6 @@ void *sys_heap_alloc(struct sys_heap *heap, size_t bytes)
 	}
 
 	set_chunk_used(h, c, true);
-#ifdef CONFIG_SYS_HEAP_RUNTIME_STATS
-	h->allocated_bytes += chunksz_to_bytes(h, chunk_size(h, c));
-#endif
 	return chunk_mem(h, c);
 }
 
@@ -322,9 +307,6 @@ void *sys_heap_aligned_alloc(struct sys_heap *heap, size_t align, size_t bytes)
 	}
 
 	set_chunk_used(h, c, true);
-#ifdef CONFIG_SYS_HEAP_RUNTIME_STATS
-	h->allocated_bytes += chunksz_to_bytes(h, chunk_size(h, c));
-#endif
 	return mem;
 }
 
@@ -360,10 +342,6 @@ void *sys_heap_aligned_realloc(struct sys_heap *heap, void *ptr,
 		return ptr;
 	} else if (chunk_size(h, c) > chunks_need) {
 		/* Shrink in place, split off and free unused suffix */
-#ifdef CONFIG_SYS_HEAP_RUNTIME_STATS
-		h->allocated_bytes -=
-			(chunk_size(h, c) - chunks_need) * CHUNK_UNIT;
-#endif
 		split_chunks(h, c, c + chunks_need);
 		set_chunk_used(h, c, true);
 		free_chunk(h, c + chunks_need);
@@ -371,11 +349,7 @@ void *sys_heap_aligned_realloc(struct sys_heap *heap, void *ptr,
 	} else if (!chunk_used(h, rc) &&
 		   (chunk_size(h, c) + chunk_size(h, rc) >= chunks_need)) {
 		/* Expand: split the right chunk and append */
-		chunksz_t split_size = chunks_need - chunk_size(h, c);
-
-#ifdef CONFIG_SYS_HEAP_RUNTIME_STATS
-		h->allocated_bytes += split_size * CHUNK_UNIT;
-#endif
+		chunkid_t split_size = chunks_need - chunk_size(h, c);
 
 		free_list_remove(h, rc);
 
@@ -405,13 +379,8 @@ void *sys_heap_aligned_realloc(struct sys_heap *heap, void *ptr,
 
 void sys_heap_init(struct sys_heap *heap, void *mem, size_t bytes)
 {
-	if (IS_ENABLED(CONFIG_SYS_HEAP_SMALL_ONLY)) {
-		/* Must fit in a 15 bit count of HUNK_UNIT */
-		__ASSERT(bytes / CHUNK_UNIT <= 0x7fffU, "heap size is too big");
-	} else {
-		/* Must fit in a 31 bit count of HUNK_UNIT */
-		__ASSERT(bytes / CHUNK_UNIT <= 0x7fffffffU, "heap size is too big");
-	}
+	/* Must fit in a 31 bit count of HUNK_UNIT */
+	__ASSERT(bytes / CHUNK_UNIT <= 0x7fffffffU, "heap size is too big");
 
 	/* Reserve the end marker chunk's header */
 	__ASSERT(bytes > heap_footer_bytes(bytes), "heap size is too small");
@@ -429,11 +398,6 @@ void sys_heap_init(struct sys_heap *heap, void *mem, size_t bytes)
 	heap->heap = h;
 	h->end_chunk = heap_sz;
 	h->avail_buckets = 0;
-
-#ifdef CONFIG_SYS_HEAP_RUNTIME_STATS
-	h->free_bytes = 0;
-	h->allocated_bytes = 0;
-#endif
 
 	int nb_buckets = bucket_idx(h, heap_sz) + 1;
 	chunksz_t chunk0_size = chunksz(sizeof(struct z_heap) +

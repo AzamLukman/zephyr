@@ -254,8 +254,6 @@ channels (e.g. ADC or DAC channels) for conversion.
 
 .. doxygengroup:: devicetree-io-channels
 
-.. _devicetree-pinctrl-api:
-
 Pinctrl (pin control)
 =====================
 

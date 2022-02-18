@@ -27,12 +27,12 @@ struct i2s_nrfx_drv_data {
 	const uint32_t *last_tx_buffer;
 	enum i2s_state state;
 	enum i2s_dir active_dir;
-	bool stop;       /* stop after the current (TX or RX) block */
-	bool discard_rx; /* discard further RX blocks */
-	volatile bool next_tx_buffer_needed;
 	bool tx_configured : 1;
 	bool rx_configured : 1;
+	bool stop          : 1; /* stop after the current (TX or RX) block */
+	bool discard_rx    : 1; /* discard further RX blocks */
 	bool request_clock : 1;
+	volatile bool next_tx_buffer_needed;
 };
 
 struct i2s_nrfx_drv_cfg {
@@ -81,7 +81,6 @@ static void find_suitable_clock(const struct i2s_nrfx_drv_cfg *drv_cfg,
 	uint32_t best_diff = UINT32_MAX;
 	uint8_t r, best_r = 0;
 	nrf_i2s_mck_t best_mck_cfg = 0;
-	uint32_t best_mck = 0;
 
 	for (r = 0; r < ARRAY_SIZE(ratios); ++r) {
 		/* Only multiples of the frame width can be used as ratios. */
@@ -111,7 +110,6 @@ static void find_suitable_clock(const struct i2s_nrfx_drv_cfg *drv_cfg,
 
 			if (diff < best_diff) {
 				best_mck_cfg = mck_factor * 4096;
-				best_mck = actual_mck;
 				best_r = r;
 				/* Stop if an exact match is found. */
 				if (diff == 0) {
@@ -152,7 +150,6 @@ static void find_suitable_clock(const struct i2s_nrfx_drv_cfg *drv_cfg,
 
 				if (diff < best_diff) {
 					best_mck_cfg = dividers[d].divider_enum;
-					best_mck = mck_freq;
 					best_r = r;
 					/* Stop if an exact match is found. */
 					if (diff == 0) {
@@ -176,8 +173,6 @@ static void find_suitable_clock(const struct i2s_nrfx_drv_cfg *drv_cfg,
 
 	config->mck_setup = best_mck_cfg;
 	config->ratio = ratios[best_r].ratio_enum;
-	LOG_INF("I2S MCK frequency: %u, actual PCM rate: %u",
-		best_mck, best_mck / ratios[best_r].ratio_val);
 }
 
 static bool get_next_tx_buffer(struct i2s_nrfx_drv_data *drv_data,
@@ -470,7 +465,9 @@ static int i2s_nrfx_configure(const struct device *dev, enum i2s_dir dir,
 		return -EINVAL;
 	}
 
-	if (i2s_cfg->channels == 2) {
+	if (i2s_cfg->channels == 2 ||
+	    (i2s_cfg->format & I2S_FMT_DATA_FORMAT_MASK)
+		== I2S_FMT_DATA_FORMAT_I2S) {
 		nrfx_cfg.channels = NRF_I2S_CHANNELS_STEREO;
 	} else if (i2s_cfg->channels == 1) {
 		nrfx_cfg.channels = NRF_I2S_CHANNELS_LEFT;
@@ -881,8 +878,8 @@ static const struct i2s_driver_api i2s_nrf_drv_api = {
 #define I2S_CLK_SRC(idx)  DT_STRING_TOKEN(I2S(idx), clock_source)
 
 #define I2S_NRFX_DEVICE(idx)						     \
-	static void *tx_msgs##idx[CONFIG_I2S_NRFX_TX_BLOCK_COUNT];	     \
-	static void *rx_msgs##idx[CONFIG_I2S_NRFX_RX_BLOCK_COUNT];	     \
+	static void *tx_msgs[CONFIG_I2S_NRFX_TX_BLOCK_COUNT];		     \
+	static void *rx_msgs[CONFIG_I2S_NRFX_RX_BLOCK_COUNT];		     \
 	static struct i2s_nrfx_drv_data i2s_nrfx_data##idx = {		     \
 		.state = I2S_STATE_READY,				     \
 	};								     \
@@ -892,11 +889,11 @@ static const struct i2s_driver_api i2s_nrf_drv_api = {
 			    nrfx_isr, nrfx_i2s_irq_handler, 0);		     \
 		irq_enable(DT_IRQN(I2S(idx)));				     \
 		k_msgq_init(&i2s_nrfx_data##idx.tx_queue,		     \
-			    (char *)tx_msgs##idx, sizeof(void *),	     \
-			    ARRAY_SIZE(tx_msgs##idx));			     \
+			    (char *)tx_msgs, sizeof(void *),		     \
+			    CONFIG_I2S_NRFX_TX_BLOCK_COUNT);		     \
 		k_msgq_init(&i2s_nrfx_data##idx.rx_queue,		     \
-			    (char *)rx_msgs##idx, sizeof(void *),	     \
-			    ARRAY_SIZE(rx_msgs##idx));			     \
+			    (char *)rx_msgs, sizeof(void *),		     \
+			    CONFIG_I2S_NRFX_RX_BLOCK_COUNT);		     \
 		init_clock_manager(dev);				     \
 		return 0;						     \
 	}								     \

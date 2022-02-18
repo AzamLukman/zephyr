@@ -36,6 +36,9 @@ static void trigger_handler(const struct device *dev,
 #ifdef CONFIG_PM_DEVICE
 static void pm_info(enum pm_device_state state, int status)
 {
+	ARG_UNUSED(dev);
+	ARG_UNUSED(arg);
+
 	switch (state) {
 	case PM_DEVICE_STATE_ACTIVE:
 		printk("Enter ACTIVE_STATE ");
@@ -46,8 +49,6 @@ static void pm_info(enum pm_device_state state, int status)
 	case PM_DEVICE_STATE_OFF:
 		printk("Enter OFF_STATE ");
 		break;
-	default:
-		printk("Unknown power state");
 	}
 
 	if (status) {

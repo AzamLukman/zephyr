@@ -221,10 +221,6 @@ static void put(const struct log_backend *const backend,
 	struct mock_log_backend *mock = backend->cb->ctx;
 	struct mock_log_backend_msg *exp = &mock->exp_msgs[mock->msg_proc_idx];
 
-	if (!mock->do_check) {
-		return;
-	}
-
 	mock->msg_proc_idx++;
 
 	if (!exp->check) {
@@ -268,10 +264,6 @@ static void process(const struct log_backend *const backend,
 	struct mock_log_backend *mock = backend->cb->ctx;
 	struct mock_log_backend_msg *exp = &mock->exp_msgs[mock->msg_proc_idx];
 
-	if (!mock->do_check) {
-		return;
-	}
-
 	mock->msg_proc_idx++;
 
 	if (!exp->check) {
@@ -288,16 +280,9 @@ static void process(const struct log_backend *const backend,
 	zassert_equal(msg->log.hdr.desc.level, exp->level, NULL);
 	zassert_equal(msg->log.hdr.desc.domain, exp->domain_id, NULL);
 
-	uint32_t source_id;
-	const void *source = msg->log.hdr.source;
-
-	if (source == NULL) {
-		source_id = 0;
-	} else {
-		source_id = IS_ENABLED(CONFIG_LOG_RUNTIME_FILTERING) ?
-		    log_dynamic_source_id((struct log_source_dynamic_data *)source) :
-		    log_const_source_id((const struct log_source_const_data *)source);
-	}
+	uint32_t source_id = IS_ENABLED(CONFIG_LOG_RUNTIME_FILTERING) ?
+		log_dynamic_source_id((struct log_source_dynamic_data *)msg->log.hdr.source) :
+		log_const_source_id((const struct log_source_const_data *)msg->log.hdr.source);
 
 	zassert_equal(source_id, exp->source_id, NULL);
 
@@ -349,10 +334,6 @@ static void sync_string(const struct log_backend *const backend,
 	struct mock_log_backend *mock = backend->cb->ctx;
 	struct mock_log_backend_msg *exp = &mock->exp_msgs[mock->msg_proc_idx];
 
-	if (!mock->do_check) {
-		return;
-	}
-
 	mock->msg_proc_idx++;
 
 	if (!exp->check) {
@@ -378,10 +359,6 @@ static void sync_hexdump(const struct log_backend *const backend,
 {
 	struct mock_log_backend *mock = backend->cb->ctx;
 	struct mock_log_backend_msg *exp = &mock->exp_msgs[mock->msg_proc_idx];
-
-	if (!mock->do_check) {
-		return;
-	}
 
 	mock->msg_proc_idx++;
 

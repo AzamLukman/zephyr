@@ -586,36 +586,33 @@ void lll_scan_aux_isr_aux_setup(void *param)
 
 static void isr_rx_ull_schedule(void *param)
 {
-	struct lll_scan_aux *lll_aux;
-	struct lll_scan *lll;
+	struct lll_scan_aux *lll;
+	struct lll_scan *scan_lll;
 
-	lll_aux = param;
-	lll = ull_scan_aux_lll_parent_get(lll_aux, NULL);
+	lll = param;
+	scan_lll = ull_scan_aux_lll_parent_get(lll, NULL);
 
-	isr_rx(lll, lll_aux, lll_aux->phy);
+	isr_rx(scan_lll, lll, lll->phy);
 }
 
 static void isr_rx_lll_schedule(void *param)
 {
+	struct lll_scan_aux *lll;
 	struct node_rx_pdu *node_rx;
-	struct lll_scan *lll;
+	struct lll_scan *scan_lll;
 	uint8_t phy_aux;
 
 	node_rx = param;
-	lll = node_rx->hdr.rx_ftr.param;
-	phy_aux = node_rx->hdr.rx_ftr.aux_phy; /* PHY remembered in node rx */
+	scan_lll = node_rx->hdr.rx_ftr.param;
+	lll = scan_lll->lll_aux;
 
-	/* scan context has used LLL scheduling for aux reception */
-	if (lll->is_aux_sched) {
-		isr_rx(lll, NULL, phy_aux);
+	if (lll) {
+		phy_aux = lll->phy;
 	} else {
-		/* `lll->lll_aux` would be allocated in ULL for LLL scheduled
-		 * auxiliary PDU reception by scan context and for case
-		 * where LLL scheduled chain PDU reception by aux context, it
-		 * is assigned with the current aux context's LLL context.
-		 */
-		isr_rx(lll, lll->lll_aux, phy_aux);
+		phy_aux = node_rx->hdr.rx_ftr.aux_phy;
 	}
+
+	isr_rx(scan_lll, NULL, phy_aux);
 }
 
 static void isr_rx(struct lll_scan *lll, struct lll_scan_aux *lll_aux,
@@ -713,16 +710,8 @@ isr_rx_do_close:
 			ull_rx_sched();
 		}
 
-		/* Check if LLL scheduled auxiliary PDU reception by scan
-		 * context or auxiliary PDU reception by aux context
-		 */
-		if (lll->is_aux_sched) {
-			/* Go back to resuming primary channel scanning */
-			radio_isr_set(lll_scan_isr_resume, lll);
-		} else {
-			/* auxiliary channel radio event done */
-			radio_isr_set(isr_done, NULL);
-		}
+		/* Resume scan if scanning ADV_AUX_IND chain */
+		radio_isr_set(lll_scan_isr_resume, lll);
 	}
 	radio_disable();
 }
@@ -1062,33 +1051,18 @@ static int isr_rx_pdu(struct lll_scan *lll, struct lll_scan_aux *lll_aux,
 	/* Passive scanner or scan responses */
 #if defined(CONFIG_BT_CENTRAL)
 	} else if (!lll->conn &&
-		   ((lll_aux && lll_aux->is_chain_sched) ||
-		    (lll->lll_aux && lll->lll_aux->is_chain_sched) ||
-		    lll_scan_ext_tgta_check(lll, false, false, pdu, rl_idx))) {
-#else /* !CONFIG_BT_CENTRAL */
-	} else if ((lll_aux && lll_aux->is_chain_sched) ||
-		   (lll->lll_aux && lll->lll_aux->is_chain_sched) ||
 		   lll_scan_ext_tgta_check(lll, false, false, pdu, rl_idx)) {
+#else /* !CONFIG_BT_CENTRAL */
+	} else if (lll_scan_ext_tgta_check(lll, false, false, pdu, rl_idx)) {
 #endif /* !CONFIG_BT_CENTRAL */
 
 		ftr = &(node_rx->hdr.rx_ftr);
 		if (lll_aux) {
 			ftr->param = lll_aux;
 			ftr->scan_rsp = lll_aux->state;
-
-			/* Further auxiliary PDU reception will be chain PDUs */
-			lll_aux->is_chain_sched = 1U;
 		} else if (lll->lll_aux) {
 			ftr->param = lll;
 			ftr->scan_rsp = lll->lll_aux->state;
-
-			/* Auxiliary PDU received by LLL scheduling by scan
-			 * context.
-			 */
-			lll->is_aux_sched = 1U;
-
-			/* Further auxiliary PDU reception will be chain PDUs */
-			lll->lll_aux->is_chain_sched = 1U;
 		} else {
 			/* Return -ECHILD, as ULL execution has not yet assigned
 			 * an aux context. This can happen only under LLL
@@ -1139,6 +1113,7 @@ static int isr_rx_pdu(struct lll_scan *lll, struct lll_scan_aux *lll_aux,
 		 * disable so prevent caller from doing it again.
 		 */
 		if (ftr->aux_lll_sched) {
+			lll->is_aux_sched = 1U;
 			return 0;
 		}
 

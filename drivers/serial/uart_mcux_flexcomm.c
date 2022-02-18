@@ -348,7 +348,7 @@ static const struct mcux_flexcomm_config mcux_flexcomm_##n##_config = {	\
 			    &mcux_flexcomm_##n##_data,			\
 			    &mcux_flexcomm_##n##_config,		\
 			    PRE_KERNEL_1,				\
-			    CONFIG_SERIAL_INIT_PRIORITY,		\
+			    CONFIG_KERNEL_INIT_PRIORITY_DEVICE,		\
 			    &mcux_flexcomm_driver_api);			\
 									\
 	UART_MCUX_FLEXCOMM_CONFIG_FUNC(n)				\
