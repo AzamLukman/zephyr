@@ -73,6 +73,7 @@
 
 #include "ll.h"
 #include "ll_feat.h"
+#include "ll_test.h"
 #include "ll_settings.h"
 
 #define BT_DBG_ENABLED IS_ENABLED(CONFIG_BT_DEBUG_HCI_DRIVER)
@@ -305,10 +306,31 @@ static MFIFO_DEFINE(prep, sizeof(struct lll_event), EVENT_PIPELINE_MAX);
 
 /* Declare done-event FIFO: mfifo_done.
  * Queue of pointers to struct node_rx_event_done.
- * The actual backing behind these pointers is mem_done
+ * The actual backing behind these pointers is mem_done.
+ *
+ * When there are radio events with time reservations lower than the preemption
+ * timeout of 1.5 ms, the pipeline has to account for the maximum radio events
+ * that can be enqueued during the preempt timeout duration. All these enqueued
+ * events could be aborted in case of late scheduling, needing as many done
+ * event buffers.
+ *
+ * During continuous scanning, there can be 1 active radio event, 1 scan resume
+ * and 1 new scan prepare. If there are peripheral prepares in addition, and due
+ * to late scheduling all these will abort needing 4 done buffers.
+ *
+ * If there are additional peripheral prepares enqueued, which are apart by
+ * their time reservations, these are not yet late and hence no more additional
+ * done buffers are needed.
+ *
+ * If Extended Scanning is supported, then an additional auxiliary scan event's
+ * prepare could be enqueued in the pipeline during the preemption duration.
  */
 #if !defined(VENDOR_EVENT_DONE_MAX)
-#define EVENT_DONE_MAX 3
+#if defined(CONFIG_BT_CTLR_ADV_EXT) && defined(CONFIG_BT_OBSERVER)
+#define EVENT_DONE_MAX 5
+#else /* !CONFIG_BT_CTLR_ADV_EXT || !CONFIG_BT_OBSERVER */
+#define EVENT_DONE_MAX 4
+#endif /* !CONFIG_BT_CTLR_ADV_EXT || !CONFIG_BT_OBSERVER */
 #else
 #define EVENT_DONE_MAX VENDOR_EVENT_DONE_MAX
 #endif
@@ -762,6 +784,14 @@ void ll_reset(void)
 	err = ull_adv_reset_finalize();
 	LL_ASSERT(!err);
 #endif /* CONFIG_BT_BROADCASTER */
+
+	/* Reset/End DTM Tx or Rx commands */
+	if (IS_ENABLED(CONFIG_BT_CTLR_DTM)) {
+		uint16_t num_rx;
+
+		(void)ll_test_end(&num_rx);
+		ARG_UNUSED(num_rx);
+	}
 
 	/* Common to init and reset */
 	err = init_reset();
@@ -2345,9 +2375,6 @@ static inline int rx_demux_rx(memq_link_t *link, struct node_rx_hdr *rx)
 	case NODE_RX_TYPE_EXT_AUX_REPORT:
 #if defined(CONFIG_BT_CTLR_SYNC_PERIODIC)
 	case NODE_RX_TYPE_SYNC_REPORT:
-#if defined(CONFIG_BT_CTLR_DF_SCAN_CTE_RX)
-	case NODE_RX_TYPE_IQ_SAMPLE_REPORT:
-#endif /* CONFIG_BT_CTLR_DF_SCAN_CTE_RX */
 #endif /* CONFIG_BT_CTLR_SYNC_PERIODIC */
 	{
 		struct pdu_adv *adv;
@@ -2371,6 +2398,22 @@ static inline int rx_demux_rx(memq_link_t *link, struct node_rx_hdr *rx)
 		ull_scan_aux_release(link, rx);
 	}
 	break;
+#if defined(CONFIG_BT_CTLR_SYNC_PERIODIC)
+	case NODE_RX_TYPE_SYNC:
+	{
+		(void)memq_dequeue(memq_ull_rx.tail, &memq_ull_rx.head, NULL);
+		ull_sync_established_report(link, rx);
+	}
+	break;
+#if defined(CONFIG_BT_CTLR_DF_SCAN_CTE_RX)
+	case NODE_RX_TYPE_IQ_SAMPLE_REPORT: {
+		(void)memq_dequeue(memq_ull_rx.tail, &memq_ull_rx.head, NULL);
+		ll_rx_put(link, rx);
+		ll_rx_sched();
+	}
+	break;
+#endif /* CONFIG_BT_CTLR_DF_SCAN_CTE_RX */
+#endif /* CONFIG_BT_CTLR_SYNC_PERIODIC */
 #endif /* CONFIG_BT_CTLR_ADV_EXT */
 #endif /* CONFIG_BT_OBSERVER */
 

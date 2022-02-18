@@ -331,6 +331,15 @@ static void zsock_accepted_cb(struct net_context *new_ctx,
 		k_condvar_init(&new_ctx->cond.recv);
 
 		k_fifo_put(&parent->accept_q, new_ctx);
+
+		/* TCP context is effectively owned by both application
+		 * and the stack: stack may detect that peer closed/aborted
+		 * connection, but it must not dispose of the context behind
+		 * the application back. Likewise, when application "closes"
+		 * context, it's not disposed of immediately - there's yet
+		 * closing handshake for stack to perform.
+		 */
+		net_context_ref(new_ctx);
 	}
 }
 
@@ -530,6 +539,8 @@ int zsock_accept_ctx(struct net_context *parent, struct sockaddr *addr,
 		if (net_pkt_eof(last_pkt)) {
 			sock_set_eof(ctx);
 			z_free_fd(fd);
+			zsock_flush_queue(ctx);
+			net_context_unref(ctx);
 			errno = ECONNABORTED;
 			return -1;
 		}
@@ -538,6 +549,8 @@ int zsock_accept_ctx(struct net_context *parent, struct sockaddr *addr,
 	if (net_context_is_closing(ctx)) {
 		errno = ECONNABORTED;
 		z_free_fd(fd);
+		zsock_flush_queue(ctx);
+		net_context_unref(ctx);
 		return -1;
 	}
 
@@ -558,18 +571,11 @@ int zsock_accept_ctx(struct net_context *parent, struct sockaddr *addr,
 		} else {
 			z_free_fd(fd);
 			errno = ENOTSUP;
+			zsock_flush_queue(ctx);
+			net_context_unref(ctx);
 			return -1;
 		}
 	}
-
-	/* TCP context is effectively owned by both application
-	 * and the stack: stack may detect that peer closed/aborted
-	 * connection, but it must not dispose of the context behind
-	 * the application back. Likewise, when application "closes"
-	 * context, it's not disposed of immediately - there's yet
-	 * closing handshake for stack to perform.
-	 */
-	net_context_ref(ctx);
 
 	NET_DBG("accept: ctx=%p, fd=%d", ctx, fd);
 
@@ -1364,6 +1370,10 @@ static int zsock_poll_update_ctx(struct net_context *ctx,
 		(*pev)++;
 	}
 
+	if (sock_is_eof(ctx)) {
+		pfd->revents |= ZSOCK_POLLHUP;
+	}
+
 	return 0;
 }
 
@@ -1991,26 +2001,7 @@ int zsock_getsockname_ctx(struct net_context *ctx, struct sockaddr *addr,
 int z_impl_zsock_getsockname(int sock, struct sockaddr *addr,
 			     socklen_t *addrlen)
 {
-	const struct socket_op_vtable *vtable;
-	struct k_mutex *lock;
-	void *ctx;
-	int ret;
-
-	ctx = get_sock_vtable(sock, &vtable, &lock);
-	if (ctx == NULL) {
-		errno = EBADF;
-		return -1;
-	}
-
-	NET_DBG("getsockname: ctx=%p, fd=%d", ctx, sock);
-
-	(void)k_mutex_lock(lock, K_FOREVER);
-
-	ret = vtable->getsockname(ctx, addr, addrlen);
-
-	k_mutex_unlock(lock);
-
-	return ret;
+	VTABLE_CALL(getsockname, sock, addr, addrlen);
 }
 
 #ifdef CONFIG_USERSPACE
