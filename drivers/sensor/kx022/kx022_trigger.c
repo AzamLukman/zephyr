@@ -29,6 +29,16 @@ static void kx022_handle_motion_int(const struct device *dev)
 	}
 }
 
+static void kx022_handle_drdy_int(const struct device *dev)
+{
+    struct kx022_data *data = dev->data;
+
+    if (data->drdy_handler != NULL)
+    {
+        data->drdy_handler(dev, &data->drdy_trigger);
+    }
+}
+
 static void kx022_handle_tilt_int(const struct device *dev)
 {
 	struct kx022_data *data = dev->data;
@@ -45,6 +55,7 @@ static void kx022_handle_int(const struct device *dev)
 	int ret;
 
 	ret = data->hw_tf->read_reg(dev, KX022_REG_INS2, &status);
+
 	if (ret < 0) {
 		return;
 	}
@@ -55,6 +66,11 @@ static void kx022_handle_int(const struct device *dev)
 
 	if (status & KX022_MASK_INS2_TPS) {
 		kx022_handle_tilt_int(dev);
+	}
+
+	if(status & KX022_MASK_INS2_DRDY){
+
+		 kx022_handle_drdy_int(dev);
 	}
 
 	ret = data->hw_tf->read_reg(dev, KX022_REG_INT_REL, &clr);
@@ -82,11 +98,9 @@ static void kx022_work_cb(struct k_work *work)
 }
 #endif
 
-/**************************************************************
- * FUNCTION : kx022_trigger_init
- * use to initialize trigger function
- *
- * ************************************************************/
+/**
+ * @brief Initializes trigger function
+ */
 int kx022_trigger_init(const struct device *dev)
 {
 	uint8_t val;
@@ -207,6 +221,35 @@ int kx022_motion_setup(const struct device *dev, sensor_trigger_handler_t handle
 	return 0;
 }
 
+int kx022_drdy_setup(const struct device *dev,
+                        sensor_trigger_handler_t handler)
+{
+    struct kx022_data *data = dev->data;
+    int ret;
+  	data->drdy_handler = handler;
+
+     kx022_mode(dev,KX022_STANDY_MODE);
+
+    ret = data->hw_tf->update_reg(dev, KX022_REG_CNTL1,
+                KX022_MASK_CNTL1_DRDYE,
+                KX022_CNTL1_DRDYE);
+
+
+    ret = data->hw_tf->update_reg(dev,
+                KX022_REG_ODCNTL,
+                KX022_MASK_ODCNTL_OSA,
+                KX022_ODCNTL_50HZ) ;
+
+     ret = data->hw_tf->update_reg(dev,
+                KX022_REG_INC4,
+                KX022_MASK_INC4_DRDYI1,
+                KX022_INC4_DRDYI1);
+
+     kx022_mode(dev,KX022_OPERATING_MODE);
+
+     return 0;
+}
+
 int kx022_tilt_setup(const struct device *dev, sensor_trigger_handler_t handler)
 {
 	struct kx022_data *data = dev->data;
@@ -277,7 +320,7 @@ int kx022_trigger_set(const struct device *dev, const struct sensor_trigger *tri
 	const struct kx022_config *cfg = dev->config;
 	uint8_t buf[6];
 
-	switch ((enum sensor_trigger_type_kx022)trig->type) {
+	switch ((int)trig->type) {
 	case SENSOR_TRIG_KX022_MOTION:
 		ret = kx022_motion_setup(dev, handler);
 		break;
@@ -285,7 +328,9 @@ int kx022_trigger_set(const struct device *dev, const struct sensor_trigger *tri
 	case SENSOR_TRIG_KX022_TILT:
 		ret = kx022_tilt_setup(dev, handler);
 		break;
-
+	case SENSOR_TRIG_DATA_READY:
+                ret = kx022_drdy_setup(dev,handler);
+		break;
 	default:
 		return -ENOTSUP;
 	}
@@ -294,7 +339,7 @@ int kx022_trigger_set(const struct device *dev, const struct sensor_trigger *tri
 		return ret;
 	}
 
-	__ASSERT_NO_MSG(trig->type == SENSOR_TRIG_DELTA);
+	// __ASSERT_NO_MSG(trig->type == SENSOR_TRIG_DELTA);
 
 	// if (gpio_pin_interrupt_configure(data->gpio, cfg->irq_pin, GPIO_INT_DISABLE)) {
 	if (gpio_pin_interrupt_configure_dt(&cfg->gpio_int, GPIO_INT_DISABLE)) {
@@ -358,18 +403,18 @@ int kx022_restore_default_tilt_setup(const struct device *dev)
 {
 	struct kx022_data *data = dev->data;
 	int ret;
-	if (kx022_mode(dev, KX022_STANDY_MODE) < 0) {
-		return -EIO;
+	ret = kx022_mode(dev, KX022_STANDY_MODE);
+	if (ret < 0) {
+		return ret;
 	}
 
 	/* reset the tilt function */
 	ret = data->hw_tf->update_reg(dev, KX022_REG_CNTL1, KX022_MASK_CNTL1_TPE,
 				    KX022_CNTL1_TPE_RESET);
 
-	if (data->hw_tf->update_reg(dev, KX022_REG_CNTL1, KX022_MASK_CNTL1_TPE,
-				    KX022_CNTL1_TPE_RESET) < 0) {
+	if (ret < 0) {
 		LOG_ERR("Failed to disable tilt");
-		return -EIO;
+		return ret;
 	}
 
 	/* reset tilt int 1 report */
@@ -377,14 +422,13 @@ int kx022_restore_default_tilt_setup(const struct device *dev)
 				    KX022_INC4_TPI1_RESET);
 	if (ret < 0) {
 		LOG_DBG("Failed to set KX022 tilt int1 report");
-		return -EIO;
+		return ret;
 	}
 
 	kx022_mode(dev, KX022_OPERATING_MODE);
 
 	return 0;
 }
-
 int kx022_restore_default_trigger_setup(const struct device *dev, const struct sensor_trigger *trig)
 {
 	int ret;

@@ -274,9 +274,8 @@ static int kx022_attr_set(const struct device *dev, enum sensor_channel chan,
 		ret = -ENOTSUP;
 	}
 
-	kx022_mode(dev, KX022_OPERATING_MODE);
 
-	return ret;
+	return kx022_mode(dev, KX022_OPERATING_MODE);
 }
 
 /* khshi dignostic mode */
@@ -338,6 +337,7 @@ static int kx022_sample_fetch_accel_xyz(const struct device *dev)
 {
 	struct kx022_data *data = dev->data;
 	uint8_t buf[6];
+	uint8_t buf1[6];
 	int ret;
 
 	ret = data->hw_tf->read_data(dev, KX022_REG_XOUT_L, buf, sizeof(buf));
@@ -345,10 +345,14 @@ static int kx022_sample_fetch_accel_xyz(const struct device *dev)
 		LOG_DBG("Failed to read sample");
 		return -EIO;
 	}
+	ret = data->hw_tf->read_data(dev, KX022_REG_XHP_L, buf1, sizeof(buf1));
 	data->sample_x = (int16_t)sys_get_le16(&buf[0]);
 	data->sample_y = (int16_t)sys_get_le16(&buf[2]);
 	data->sample_z = (int16_t)sys_get_le16(&buf[4]);
 
+	// printk("high filter x %d \t%d\t%d\r\n",(int16_t)sys_get_le16(&buf1[0]),
+	// 				(int16_t)sys_get_le16(&buf1[2]),
+	// 				(int16_t)sys_get_le16(&buf1[4]));
 	return 0;
 }
 
@@ -373,7 +377,6 @@ static int kx022_motion_direction(const struct device *dev)
 
 static int kx022_sample_fetch(const struct device *dev, enum sensor_channel chan)
 {
-	// if (chan < SENSOR_CHAN_PRIV_START) {
 		switch ((int)chan)
 		{
 			case SENSOR_CHAN_ACCEL_X:
@@ -549,6 +552,9 @@ static int kx022_init(const struct device *dev)
 		return -EIO;
 	}
 
+	ret = data->hw_tf->update_reg(dev, KX022_REG_CNTL3, KX022_MASK_CNTL3_OWUF,
+				0x06);
+
 #ifdef CONFIG_KX022_TRIGGER
 	if (kx022_trigger_init(dev) < 0) {
 		LOG_ERR("Failed to initialize triggers.");
@@ -556,8 +562,10 @@ static int kx022_init(const struct device *dev)
 	}
 #endif
 
-	/* Set Kx022 to Operating Mode */
-	kx022_mode(dev, KX022_OPERATING_MODE);
+	/* Set KX022 to Operating Mode */
+	if (kx022_mode(dev, KX022_OPERATING_MODE) < 0) {
+		return -EIO;
+	}
 
 	if (cfg->full_scale == KX022_FS_2G) {
 		data->gain = GAIN_XL;

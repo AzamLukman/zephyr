@@ -377,6 +377,9 @@ struct kx022_data {
 	const struct device *gpio;
 	struct gpio_callback gpio_cb;
 
+	struct sensor_trigger drdy_trigger;
+	sensor_trigger_handler_t drdy_handler;
+
 	struct sensor_trigger motion_trigger;
 	sensor_trigger_handler_t motion_handler;
 
