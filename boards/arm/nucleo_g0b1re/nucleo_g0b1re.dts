@@ -138,7 +138,17 @@ zephyr_udc0: &usb {
 &spi1 {
 	pinctrl-0 = <&spi1_nss_pb0 &spi1_sck_pa5
 		     &spi1_miso_pa6 &spi1_mosi_pa7>;
+
 	status = "okay";
+	loragw@0{
+		compatible = "ebyte,loragw";
+		label = "LORAGW";
+		spi-max-frequency = <2000000>; /*4Mhz */
+		reg = <0>;
+		status = "okay";
+
+	};
+
 };
 
 &spi2 {

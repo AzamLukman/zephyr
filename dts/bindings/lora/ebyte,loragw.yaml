@@ -1,0 +1,5 @@
+description: LORAGW
+
+compatible: "ebyte,loragw"
+
+include: spi-device.yaml

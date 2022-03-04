@@ -11,6 +11,8 @@ source "drivers/ieee802154/Kconfig"
 
 source "drivers/lora/Kconfig"
 
+source "drivers/loragw/Kconfig"
+
 source "drivers/console/Kconfig"
 
 source "drivers/debug/Kconfig"
