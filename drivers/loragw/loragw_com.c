@@ -4,11 +4,12 @@
 
 #include "loragw_com.h"
 #include "loragw_spi.h"
+#include "loragw_aux.h"
 
 /* -------------------------------------------------------------------------- */
 /* --- PRIVATE MACROS ------------------------------------------------------- */
 
-#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+// #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #if DEBUG_COM == 1
     #define DEBUG_MSG(str)                fprintf(stdout, str)
     #define DEBUG_PRINTF(fmt, args...)    fprintf(stdout,"%s:%d: "fmt, __FUNCTION__, __LINE__, args)
@@ -46,7 +47,7 @@ int lgw_com_rmw(const struct device *dev, uint8_t spi_mux_target, uint16_t addre
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
 /* Burst (multiple-byte) write */
-int lgw_com_wb(const struct device *dev, uint8_t spi_mux_target, uint16_t address, const uint8_t *data, uint16_t size) {
+int lgw_com_wb(const struct device *dev, uint8_t spi_mux_target, uint16_t address, uint8_t *data, uint16_t size) {
     int com_stat;
     com_stat = lgw_spi_wb(dev, spi_mux_target, address, data, size);
     return com_stat;

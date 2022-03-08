@@ -38,7 +38,7 @@ int lgw_com_r(const struct device *dev, uint8_t spi_mux_target, uint16_t address
 
 int lgw_com_rmw(const struct device *dev, uint8_t spi_mux_target, uint16_t address, uint8_t offs, uint8_t leng, uint8_t data);
 
-int lgw_com_wb(const struct device *dev, uint8_t spi_mux_target, uint16_t address, const uint8_t *data, uint16_t size);
+int lgw_com_wb(const struct device *dev, uint8_t spi_mux_target, uint16_t address, uint8_t *data, uint16_t size);
 
 int lgw_com_rb(const struct device *dev, uint8_t spi_mux_target, uint16_t address, uint8_t *data, uint16_t size);
 

@@ -8,10 +8,8 @@
 /* -------------------------------------------------------------------------- */
 /* --- PUBLIC CONSTANTS ----------------------------------------------------- */
 
-#define LGW_COM_SUCCESS      0
 #define LGW_SPI_SUCCESS     0
 #define LGW_SPI_ERROR       -1
-
 
 int lgw_spi_w(const struct device *dev, uint8_t spi_mux_target, uint16_t address, uint8_t data);
 
