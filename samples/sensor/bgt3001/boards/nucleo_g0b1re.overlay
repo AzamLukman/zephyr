@@ -1,0 +1,7 @@
+&usart1 {
+	bgt3001 {
+		compatible = "vemsee,bgt3001";
+		label = "BGT3001";
+		status= "okay";
+	};
+};

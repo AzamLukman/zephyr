@@ -269,6 +269,10 @@ static int on_body(struct http_parser *parser, const char *at, size_t length)
 		req->internal.response.body_start = (uint8_t *)at;
 	}
 
+	/* Calculate the length of the body */
+	req->internal.response.body_len = req->internal.response.data_len -
+		(req->internal.response.body_start - req->internal.response.recv_buf);
+
 	return 0;
 }
 
@@ -452,6 +456,7 @@ static int http_wait_data(int sock, struct http_request *req)
 				/* Re-use the result buffer and start to fill it again */
 				req->internal.response.data_len = 0;
 				req->internal.response.body_start = NULL;
+				req->internal.response.body_len = 0;
 			}
 		}
 
@@ -471,7 +476,7 @@ static void http_timeout(struct k_work *work)
 	struct http_client_internal_data *data =
 		CONTAINER_OF(dwork, struct http_client_internal_data, work);
 
-	(void)zsock_close(data->sock);
+	(void)zsock_shutdown(data->sock, ZSOCK_SHUT_RD);
 }
 
 int http_client_req(int sock, struct http_request *req,

@@ -718,10 +718,10 @@ static int transceive_dma(const struct device *dev,
 	/* Set buffers info */
 	spi_context_buffers_setup(&data->ctx, tx_bufs, rx_bufs, 1);
 
+	LL_SPI_Enable(spi);
+
 	/* This is turned off in spi_stm32_complete(). */
 	spi_stm32_cs_control(dev, true);
-
-	LL_SPI_Enable(spi);
 
 	while (data->ctx.rx_len > 0 || data->ctx.tx_len > 0) {
 		size_t dma_len;
@@ -754,12 +754,8 @@ static int transceive_dma(const struct device *dev,
 		}
 #endif
 
-		/* wait until TX buffer is really empty */
-		while (LL_SPI_IsActiveFlag_TXE(spi) == 0) {
-		}
-
-		/* wait until hardware is really ready */
-		while (LL_SPI_IsActiveFlag_BSY(spi) == 1) {
+		/* wait until spi is no more busy (spi TX fifo is really empty) */
+		while (ll_func_spi_dma_busy(spi) == 0) {
 		}
 
 		LL_SPI_DisableDMAReq_TX(spi);
@@ -769,14 +765,16 @@ static int transceive_dma(const struct device *dev,
 		spi_context_update_rx(&data->ctx, 1, dma_len);
 	}
 
+	/* spi complete relies on SPI Status Reg which cannot be disabled */
+	spi_stm32_complete(dev, ret);
+	/* disable spi instance after completion */
 	LL_SPI_Disable(spi);
+	/* The Config. Reg. on some mcus is write un-protected when SPI is disabled */
 	LL_SPI_DisableDMAReq_TX(spi);
 	LL_SPI_DisableDMAReq_RX(spi);
 
 	dma_stop(data->dma_rx.dma_dev, data->dma_rx.channel);
 	dma_stop(data->dma_tx.dma_dev, data->dma_tx.channel);
-
-	spi_stm32_complete(dev, ret);
 
 end:
 	spi_context_release(&data->ctx, ret);

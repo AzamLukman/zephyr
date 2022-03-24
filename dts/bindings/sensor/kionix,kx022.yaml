@@ -136,7 +136,7 @@ properties:
     motion-threshold:
       type: int
       required: false
-      default: 1
+      default: 3
       description: |
         The motion threshold is calculated using Formula:
         value/16 = ths in unit g(default : KX022_FS 2g):
@@ -149,7 +149,7 @@ properties:
     motion-detection-timer:
       type: int
       required: false
-      default: 6
+      default: 1
       description: |
         The duration in second for motion,calculated by using this function
         Value/ Motion Wake-up Output data rate(default:KX022_MOTION_ODR 25hz).

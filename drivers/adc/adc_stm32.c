@@ -3,6 +3,7 @@
  * Copyright (c) 2019 Song Qiang <songqiang1304521@gmail.com>
  * Copyright (c) 2019 Endre Karlson
  * Copyright (c) 2020 Teslabs Engineering S.L.
+ * Copyright (c) 2021 Marius Scholtz, RIC Electronics
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -35,6 +36,9 @@ LOG_MODULE_REGISTER(adc_stm32);
 #define STM32F3X_ADC_V1_1
 #endif
 #endif
+
+/* reference voltage for the ADC */
+#define STM32_ADC_VREF_MV DT_INST_PROP(0, vref_mv)
 
 #if !defined(CONFIG_SOC_SERIES_STM32F0X) && \
 	!defined(CONFIG_SOC_SERIES_STM32G0X) && \
@@ -245,6 +249,10 @@ struct adc_stm32_cfg {
 	size_t pinctrl_len;
 };
 
+#ifdef CONFIG_ADC_STM32_SHARED_IRQS
+static bool init_irq = true;
+#endif
+
 static int check_buffer_size(const struct adc_sequence *sequence,
 			     uint8_t active_channels)
 {
@@ -329,7 +337,6 @@ static int adc_stm32_enable(ADC_TypeDef *adc)
 	defined(CONFIG_SOC_SERIES_STM32WBX) || \
 	defined(CONFIG_SOC_SERIES_STM32G0X) || \
 	defined(CONFIG_SOC_SERIES_STM32G4X) || \
-	defined(CONFIG_SOC_SERIES_STM32H7X) || \
 	defined(CONFIG_SOC_SERIES_STM32WLX)
 
 	if (LL_ADC_IsEnabled(adc) == 1UL) {
@@ -360,6 +367,23 @@ static int adc_stm32_enable(ADC_TypeDef *adc)
 #endif
 
 	return 0;
+}
+
+static void adc_stm32_remove_common_path(const struct device *dev)
+{
+	const struct adc_stm32_cfg *config =
+		(const struct adc_stm32_cfg *)dev->config;
+	ADC_TypeDef *adc = (ADC_TypeDef *)config->base;
+	(void) adc; /* Avoid 'unused variable' warning for some families */
+
+	LL_ADC_Disable(adc);
+	while (LL_ADC_IsEnabled(adc) == 1UL) {
+	}
+
+	LL_ADC_SetCommonPathInternalChRem(__LL_ADC_COMMON_INSTANCE(adc),
+					  (LL_ADC_PATH_INTERNAL_VREFINT | LL_ADC_PATH_INTERNAL_TEMPSENSOR | LL_ADC_PATH_INTERNAL_VBAT));
+
+	adc_stm32_enable(adc);
 }
 
 static int start_read(const struct device *dev,
@@ -452,9 +476,10 @@ static int start_read(const struct device *dev,
 		return err;
 	}
 
-#if defined(CONFIG_SOC_SERIES_STM32G0X)
+#if defined(CONFIG_SOC_SERIES_STM32G0X) || \
+	defined(CONFIG_SOC_SERIES_STM32WLX)
 	/*
-	 * Errata: Writing ADC_CFGR1 register while ADEN bit is set
+	 * Writing ADC_CFGR1 register while ADEN bit is set
 	 * resets RES[1:0] bitfield. We need to disable and enable adc.
 	 */
 	if (LL_ADC_IsEnabled(adc) == 1UL) {
@@ -469,7 +494,8 @@ static int start_read(const struct device *dev,
 	LL_ADC_SetResolution(adc, resolution);
 #endif
 
-#ifdef CONFIG_SOC_SERIES_STM32L0X
+#if defined(CONFIG_SOC_SERIES_STM32L0X) || \
+	defined(CONFIG_SOC_SERIES_STM32WLX)
 	/*
 	 * setting OVS bits is conditioned to ADC state: ADC must be disabled
 	 * or enabled without conversion on going : disable it, it will stop
@@ -621,7 +647,11 @@ static int start_read(const struct device *dev,
 
 	adc_context_start_read(&data->ctx, sequence);
 
-	return adc_context_wait_for_completion(&data->ctx);
+	err = adc_context_wait_for_completion(&data->ctx);
+
+	adc_stm32_remove_common_path(dev);
+
+	return err;
 }
 
 static void adc_context_start_sampling(struct adc_context *ctx)
@@ -656,7 +686,7 @@ static void adc_stm32_isr(const struct device *dev)
 
 	adc_context_on_sampling_done(&data->ctx, dev);
 
-	LOG_DBG("ISR triggered.");
+	LOG_DBG("%s ISR triggered.", dev->name);
 }
 
 static int adc_stm32_read(const struct device *dev,
@@ -719,8 +749,6 @@ static void adc_stm32_set_common_path(const struct device *dev, uint32_t PathInt
 	ADC_TypeDef *adc = (ADC_TypeDef *)config->base;
 	(void) adc; /* Avoid 'unused variable' warning for some families */
 
-	/* Do not remove existing paths */
-	PathInternal |= LL_ADC_GetCommonPathInternalCh(__LL_ADC_COMMON_INSTANCE(adc));
 	LL_ADC_SetCommonPathInternalCh(__LL_ADC_COMMON_INSTANCE(adc), PathInternal);
 }
 
@@ -747,6 +775,8 @@ static void adc_stm32_setup_speed(const struct device *dev, uint8_t id,
 static int adc_stm32_channel_setup(const struct device *dev,
 				   const struct adc_channel_cfg *channel_cfg)
 {
+	const struct adc_stm32_cfg *config = dev->config;
+	ADC_TypeDef *adc = (ADC_TypeDef *)config->base;
 #if defined(CONFIG_SOC_SERIES_STM32F0X) || \
 	defined(CONFIG_SOC_SERIES_STM32G0X) || \
 	 defined(CONFIG_SOC_SERIES_STM32L0X)
@@ -759,8 +789,7 @@ static int adc_stm32_channel_setup(const struct device *dev,
 		return -EINVAL;
 	}
 
-	acq_time_index = adc_stm32_check_acq_time(
-				channel_cfg->acquisition_time);
+	acq_time_index = adc_stm32_check_acq_time(channel_cfg->acquisition_time);
 	if (acq_time_index < 0) {
 		return acq_time_index;
 	}
@@ -792,14 +821,21 @@ static int adc_stm32_channel_setup(const struct device *dev,
 		return -EINVAL;
 	}
 
+	LL_ADC_Disable(adc);
+	while (LL_ADC_IsEnabled(adc) == 1UL) {
+	}
+
 	if (__LL_ADC_CHANNEL_TO_DECIMAL_NB(ADC_CHANNEL_TEMPSENSOR) == channel_cfg->channel_id) {
 		adc_stm32_set_common_path(dev, LL_ADC_PATH_INTERNAL_TEMPSENSOR);
 	} else if (__LL_ADC_CHANNEL_TO_DECIMAL_NB(ADC_CHANNEL_VREFINT) == channel_cfg->channel_id) {
 		adc_stm32_set_common_path(dev, LL_ADC_PATH_INTERNAL_VREFINT);
+	} else if (__LL_ADC_CHANNEL_TO_DECIMAL_NB(ADC_CHANNEL_VBAT) == channel_cfg->channel_id) {
+		adc_stm32_set_common_path(dev, LL_ADC_PATH_INTERNAL_VBAT);
 	}
 
-	adc_stm32_setup_speed(dev, channel_cfg->channel_id,
-				  acq_time_index);
+	adc_stm32_enable(adc);
+
+	adc_stm32_setup_speed(dev, channel_cfg->channel_id, acq_time_index);
 
 	LOG_DBG("Channel setup succeeded!");
 
@@ -917,12 +953,6 @@ static int adc_stm32_init(const struct device *dev)
 		LL_ADC_ClearFlag_ADRDY(adc);
 	}
 
-	/*
-	 * These STM32 series has one internal voltage reference source
-	 * to be enabled.
-	 */
-	LL_ADC_SetCommonPathInternalCh(__LL_ADC_COMMON_INSTANCE(adc),
-				       LL_ADC_PATH_INTERNAL_VREFINT);
 #endif
 
 #if defined(CONFIG_SOC_SERIES_STM32F0X) || \
@@ -1007,14 +1037,64 @@ static const struct adc_driver_api api_stm32_driver_api = {
 #ifdef CONFIG_ADC_ASYNC
 	.read_async = adc_stm32_read_async,
 #endif
+	.ref_internal = STM32_ADC_VREF_MV, /* VREF is usually connected to VDD */
 };
 
-#define STM32_ADC_INIT(index)						\
-									\
-static void adc_stm32_cfg_func_##index(void);				\
-									\
-static const struct soc_gpio_pinctrl adc_pins_##index[] =		\
-	ST_STM32_DT_INST_PINCTRL(index, 0);				\
+#ifdef CONFIG_ADC_STM32_SHARED_IRQS
+
+bool adc_stm32_is_irq_active(ADC_TypeDef *adc)
+{
+	return LL_ADC_IsActiveFlag_EOCS(adc) ||
+	       LL_ADC_IsActiveFlag_OVR(adc) ||
+	       LL_ADC_IsActiveFlag_JEOS(adc) ||
+	       LL_ADC_IsActiveFlag_AWD1(adc);
+}
+
+#define HANDLE_IRQS(index)							\
+	static const struct device *dev_##index = DEVICE_DT_INST_GET(index);	\
+	const struct adc_stm32_cfg *cfg_##index = dev_##index->config;		\
+	ADC_TypeDef *adc_##index = (ADC_TypeDef *)(cfg_##index->base);		\
+										\
+	if (adc_stm32_is_irq_active(adc_##index)) {				\
+		adc_stm32_isr(dev_##index);					\
+	}
+
+static void adc_stm32_shared_irq_handler(void)
+{
+	DT_INST_FOREACH_STATUS_OKAY(HANDLE_IRQS);
+}
+
+static void adc_stm32_irq_init(void)
+{
+	if (init_irq) {
+		init_irq = false;
+		IRQ_CONNECT(DT_INST_IRQN(0),
+			DT_INST_IRQ(0, priority),
+			adc_stm32_shared_irq_handler, NULL, 0);
+		irq_enable(DT_INST_IRQN(0));
+	}
+}
+
+#define ADC_STM32_CONFIG(index)						\
+static const struct adc_stm32_cfg adc_stm32_cfg_##index = {		\
+	.base = (ADC_TypeDef *)DT_INST_REG_ADDR(index),			\
+	.irq_cfg_func = adc_stm32_irq_init,				\
+	.pclken = {							\
+		.enr = DT_INST_CLOCKS_CELL(index, bits),		\
+		.bus = DT_INST_CLOCKS_CELL(index, bus),			\
+	},								\
+	.pinctrl = adc_pins_##index,					\
+	.pinctrl_len = ARRAY_SIZE(adc_pins_##index),			\
+};
+#else
+#define ADC_STM32_CONFIG(index)						\
+static void adc_stm32_cfg_func_##index(void)				\
+{									\
+	IRQ_CONNECT(DT_INST_IRQN(index),				\
+		    DT_INST_IRQ(index, priority),			\
+		    adc_stm32_isr, DEVICE_DT_INST_GET(index), 0);	\
+	irq_enable(DT_INST_IRQN(index));				\
+}									\
 									\
 static const struct adc_stm32_cfg adc_stm32_cfg_##index = {		\
 	.base = (ADC_TypeDef *)DT_INST_REG_ADDR(index),			\
@@ -1025,7 +1105,16 @@ static const struct adc_stm32_cfg adc_stm32_cfg_##index = {		\
 	},								\
 	.pinctrl = adc_pins_##index,					\
 	.pinctrl_len = ARRAY_SIZE(adc_pins_##index),			\
-};									\
+};
+#endif
+
+#define STM32_ADC_INIT(index)						\
+									\
+static const struct soc_gpio_pinctrl adc_pins_##index[] =		\
+	ST_STM32_DT_INST_PINCTRL(index, 0);				\
+									\
+ADC_STM32_CONFIG(index)							\
+									\
 static struct adc_stm32_data adc_stm32_data_##index = {			\
 	ADC_CONTEXT_INIT_TIMER(adc_stm32_data_##index, ctx),		\
 	ADC_CONTEXT_INIT_LOCK(adc_stm32_data_##index, ctx),		\
@@ -1036,14 +1125,6 @@ DEVICE_DT_INST_DEFINE(index,						\
 		    &adc_stm32_init, NULL,				\
 		    &adc_stm32_data_##index, &adc_stm32_cfg_##index,	\
 		    POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,	\
-		    &api_stm32_driver_api);				\
-									\
-static void adc_stm32_cfg_func_##index(void)				\
-{									\
-	IRQ_CONNECT(DT_INST_IRQN(index),				\
-		    DT_INST_IRQ(index, priority),			\
-		    adc_stm32_isr, DEVICE_DT_INST_GET(index), 0);	\
-	irq_enable(DT_INST_IRQN(index));				\
-}
+		    &api_stm32_driver_api);
 
 DT_INST_FOREACH_STATUS_OKAY(STM32_ADC_INIT)
