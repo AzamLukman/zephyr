@@ -152,38 +152,14 @@ static int paw3335_sample_fetch(const struct device *dev, enum sensor_channel ch
 	struct paw3335_data *data = dev->data;
 	uint8_t buffer[12];
 
-	// paw3335_read(dev, 0x02, &data->sample);
-	// printk("MOTION BIT = %x\n", data->sample);
-	// paw3335_read(dev, 0x03, &data->data_xl);
-	// paw3335_read(dev, 0x04, &data->data_xh);
-	// paw3335_read(dev, 0x05, &data->data_yl);
-	// paw3335_read(dev, 0x06, &data->data_yh);
-
 	paw3335_read(dev, 0x16, buffer, 12);
-
 	k_usleep(100);
-
-	// for (int i = 0; i < 12; i++)
-	// {
-	// 	printk("buffer = %x\n", buffer[i]);
-
-	// }
-
 	k_usleep(1);
 	data->motion = buffer[0];
 	data->data_xl = buffer[2];
 	data->data_xh = buffer[3];
 	data->data_yl = buffer[4];
 	data->data_yh = buffer[5];
-
-	// paw3335_rawdata_grab(dev, frame);
-
-
-	// for (int i = 0; i < 900; i++)
-	// {
-	// 	printk("%d", frame[i]);
-	// 	printk("A");
-	// }
 
 	return 0;
 }
@@ -311,8 +287,7 @@ static int paw3335_init(const struct device *dev)
 	{
 		paw3335_read(dev, 0x20, &reg, 1);
 		if (reg == 0x0F){
-		//	printk("REG = %d\t, CNT = %d\n\n", reg, i);
-						break;
+			break;
 		}
 		k_msleep(1);
 	}
@@ -352,7 +327,6 @@ static int paw3335_init(const struct device *dev)
 	paw3335_write(dev, 0x5A, reso);
 	paw3335_read(dev, 0x5A, &reso, 1);
 	printk("ripple counter = %X\n\n", reso);
-
 
 	return 0;
 }
