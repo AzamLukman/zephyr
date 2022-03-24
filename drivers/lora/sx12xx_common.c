@@ -30,28 +30,28 @@ struct sx12xx_rx_params {
 };
 
 static struct sx12xx_data {
+	const struct device *dev;
 	struct k_poll_signal *operation_done;
+	lora_recv_cb async_rx_cb;
 	RadioEvents_t events;
 	struct lora_modem_config tx_cfg;
 	atomic_t modem_usage;
 	struct sx12xx_rx_params rx_params;
 } dev_data;
 
-int __sx12xx_configure_pin(const struct device **dev, const char *controller,
-			   gpio_pin_t pin, gpio_flags_t flags)
+int __sx12xx_configure_pin(const struct gpio_dt_spec *gpio, gpio_flags_t flags)
 {
 	int err;
 
-	*dev = device_get_binding(controller);
-	if (!(*dev)) {
-		LOG_ERR("Cannot get pointer to %s device", controller);
-		return -EIO;
+	if (!device_is_ready(gpio->port)) {
+		LOG_ERR("GPIO device not ready %s", gpio->port->name);
+		return -ENODEV;
 	}
 
-	err = gpio_pin_configure(*dev, pin, flags);
+	err = gpio_pin_configure_dt(gpio, flags);
 	if (err) {
-		LOG_ERR("Cannot configure gpio %s %d: %d", controller, pin,
-			err);
+		LOG_ERR("Cannot configure gpio %s %d: %d", gpio->port->name,
+			gpio->pin, err);
 		return err;
 	}
 
@@ -68,6 +68,8 @@ int __sx12xx_configure_pin(const struct device **dev, const char *controller,
  */
 static inline bool modem_acquire(struct sx12xx_data *data)
 {
+				printk("lora modem acq?\n");
+
 	return atomic_cas(&data->modem_usage, STATE_FREE, STATE_BUSY);
 }
 
@@ -100,6 +102,16 @@ static void sx12xx_ev_rx_done(uint8_t *payload, uint16_t size, int16_t rssi,
 			      int8_t snr)
 {
 	struct k_poll_signal *sig = dev_data.operation_done;
+
+	/* Receiving in asynchronous mode */
+	if (dev_data.async_rx_cb) {
+		/* Start receiving again */
+		Radio.Rx(0);
+		/* Run the callback */
+		dev_data.async_rx_cb(dev_data.dev, payload, size, rssi, snr);
+		/* Don't run the synchronous code */
+		return;
+	}
 
 	/* Manually release the modem instead of just calling modem_release
 	 * as we need to perform cleanup operations while still ensuring
@@ -169,10 +181,16 @@ int sx12xx_lora_send(const struct device *dev, uint8_t *data,
 		return -EINVAL;
 	}
 
+				printk("lora send22?\n");
+
+
 	ret = sx12xx_lora_send_async(dev, data, data_len, &done);
 	if (ret < 0) {
+		printk("ret async = %d\n", ret);
 		return ret;
 	}
+			printk("lora send?\n");
+
 
 	/* Calculate expected airtime of the packet */
 	air_time = Radio.TimeOnAir(MODEM_LORA,
@@ -188,6 +206,7 @@ int sx12xx_lora_send(const struct device *dev, uint8_t *data,
 	 * a failed transmission, and not some minor timing variation between
 	 * modem and driver.
 	 */
+		//k_poll(&evt, 1, K_FOREVER);
 	ret = k_poll(&evt, 1, K_MSEC(2 * air_time));
 	if (ret < 0) {
 		LOG_ERR("Packet transmission failed!");
@@ -203,9 +222,16 @@ int sx12xx_lora_send_async(const struct device *dev, uint8_t *data,
 			   uint32_t data_len, struct k_poll_signal *async)
 {
 	/* Ensure available, freed by sx12xx_ev_tx_done */
-	if (!modem_acquire(&dev_data)) {
+	int err;
+	err = modem_acquire(&dev_data);
+
+	if (err < 0) {
+		printk("ERR = %d\n", err);
 		return -EBUSY;
 	}
+			printk("ERR = %d\n", err);
+
+			printk("lora send async?\n");
 
 	/* Store signal */
 	dev_data.operation_done = async;
@@ -232,6 +258,7 @@ int sx12xx_lora_recv(const struct device *dev, uint8_t *data, uint8_t size,
 		return -EBUSY;
 	}
 
+	dev_data.async_rx_cb = NULL;
 	/* Store operation signal */
 	dev_data.operation_done = &done;
 	/* Set data output location */
@@ -260,6 +287,32 @@ int sx12xx_lora_recv(const struct device *dev, uint8_t *data, uint8_t size,
 	}
 
 	return size;
+}
+
+int sx12xx_lora_recv_async(const struct device *dev, lora_recv_cb cb)
+{
+	/* Cancel ongoing reception */
+	if (cb == NULL) {
+		if (!modem_release(&dev_data)) {
+			/* Not receiving or already being stopped */
+			return -EINVAL;
+		}
+		return 0;
+	}
+
+	/* Ensure available */
+	if (!modem_acquire(&dev_data)) {
+		return -EBUSY;
+	}
+
+	/* Store parameters */
+	dev_data.async_rx_cb = cb;
+
+	/* Start reception */
+	Radio.SetMaxPayloadLength(MODEM_LORA, 255);
+	Radio.Rx(0);
+
+	return 0;
 }
 
 int sx12xx_lora_config(const struct device *dev,
@@ -309,6 +362,7 @@ int sx12xx_init(const struct device *dev)
 {
 	atomic_set(&dev_data.modem_usage, 0);
 
+	dev_data.dev = dev;
 	dev_data.events.TxDone = sx12xx_ev_tx_done;
 	dev_data.events.RxDone = sx12xx_ev_rx_done;
 	Radio.Init(&dev_data.events);
@@ -324,3 +378,4 @@ int sx12xx_init(const struct device *dev)
 
 	return 0;
 }
+

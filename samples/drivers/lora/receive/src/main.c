@@ -48,7 +48,6 @@ void main(void)
 		return;
 	}
 
-	while (1) {
 		/* Block until data arrives */
 		len = lora_recv(lora_dev, data, MAX_DATA_LEN, K_FOREVER,
 				&rssi, &snr);
@@ -59,5 +58,5 @@ void main(void)
 
 		LOG_INF("Received data: %s (RSSI:%ddBm, SNR:%ddBm)",
 			log_strdup(data), rssi, snr);
-	}
+
 }

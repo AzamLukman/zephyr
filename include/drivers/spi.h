@@ -1,4 +1,4 @@
-/*
+ /*
  * Copyright (c) 2015 Intel Corporation
  *
  * SPDX-License-Identifier: Apache-2.0

@@ -14,13 +14,13 @@
 BUILD_ASSERT(DT_NODE_HAS_STATUS(DEFAULT_RADIO_NODE, okay),
 	     "No default LoRa radio specified in DT");
 
-#define MAX_DATA_LEN 10
+#define MAX_DATA_LEN 1
 
 #define LOG_LEVEL CONFIG_LOG_DEFAULT_LEVEL
 #include <logging/log.h>
 LOG_MODULE_REGISTER(lora_send);
 
-char data[MAX_DATA_LEN] = {'h', 'e', 'l', 'l', 'o', 'w', 'o', 'r', 'l', 'd'};
+char data[MAX_DATA_LEN] = {'a'};
 
 void main(void)
 {
@@ -28,10 +28,13 @@ void main(void)
 	struct lora_modem_config config;
 	int ret;
 
+	printk("HI\n");
 	if (!device_is_ready(lora_dev)) {
 		LOG_ERR("%s Device not ready", lora_dev->name);
 		return;
 	}
+
+	printk("BYE\n");
 
 	config.frequency = 865100000;
 	config.bandwidth = BW_125_KHZ;
@@ -47,10 +50,14 @@ void main(void)
 		return;
 	}
 
+		printk("HELLO?\n");
+
+
 	while (1) {
 		ret = lora_send(lora_dev, data, MAX_DATA_LEN);
 		if (ret < 0) {
 			LOG_ERR("LoRa send failed");
+			printk("ret = %d\n", ret);
 			return;
 		}
 

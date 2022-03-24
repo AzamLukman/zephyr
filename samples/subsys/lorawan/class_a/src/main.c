@@ -16,13 +16,18 @@ BUILD_ASSERT(DT_NODE_HAS_STATUS(DEFAULT_RADIO_NODE, okay),
 #define DEFAULT_RADIO DT_LABEL(DEFAULT_RADIO_NODE)
 
 /* Customize based on network configuration */
-#define LORAWAN_DEV_EUI			{ 0xDD, 0xEE, 0xAA, 0xDD, 0xBB, 0xEE,\
-					  0xEE, 0xFF }
+//70B3D57ED004DEEA
+#define LORAWAN_DEV_EUI			{ 0x70, 0xB3, 0xD5, 0x7E, 0xD0, 0x04,\
+					  0xDE, 0xEA }
 #define LORAWAN_JOIN_EUI		{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,\
 					  0x00, 0x00 }
-#define LORAWAN_APP_KEY			{ 0x2B, 0x7E, 0x15, 0x16, 0x28, 0xAE,\
-					  0xD2, 0xA6, 0xAB, 0xF7, 0x15, 0x88,\
-					  0x09, 0xCF, 0x4F, 0x3C }
+					//  47763BEE759A3416BA058D57EAC21F87
+#define LORAWAN_APP_KEY			{ 0x47, 0x76, 0x3B, 0xEE, 0x75, 0x9A,\
+					  0x34, 0x16, 0xBA, 0x05, 0x8D, 0x57,\
+					  0xEA, 0xC2, 0x1F, 0x87 }
+#define LORAWAN_NWK_KEY			{ 0x42, 0x8B, 0x6D, 0xB5, 0xFF,	0x9D,\
+					  0x5F, 0x64, 0x69, 0xA2, 0x63, 0xE5,\
+					  0xB8, 0x91, 0x76, 0x70 }
 
 #define DELAY K_MSEC(10000)
 
@@ -57,6 +62,8 @@ void main(void)
 	uint8_t dev_eui[] = LORAWAN_DEV_EUI;
 	uint8_t join_eui[] = LORAWAN_JOIN_EUI;
 	uint8_t app_key[] = LORAWAN_APP_KEY;
+	uint8_t nwk_key[] = LORAWAN_NWK_KEY;
+
 	int ret;
 
 	struct lorawan_downlink_cb downlink_cb = {
@@ -83,7 +90,7 @@ void main(void)
 	join_cfg.dev_eui = dev_eui;
 	join_cfg.otaa.join_eui = join_eui;
 	join_cfg.otaa.app_key = app_key;
-	join_cfg.otaa.nwk_key = app_key;
+	join_cfg.otaa.nwk_key = nwk_key;
 
 	LOG_INF("Joining network over OTAA");
 	ret = lorawan_join(&join_cfg);
