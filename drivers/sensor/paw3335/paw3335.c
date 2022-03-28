@@ -10,6 +10,8 @@
 #include <drivers/spi.h>
 #include <logging/log.h>
 
+#include <drivers/sensor/paw3335.h>
+
 #define PAW3335_READ	0x7F
 #define PAW3335_WRITE	0x80
 
@@ -134,19 +136,6 @@ static int paw3335_rawdata_grab(const struct device *dev, uint8_t frame[])
 	return 0;
 }
 
-static int paw3335_set_resolution(const struct device *dev, uint8_t reso)
-{
-	int ret;
-
-	ret = paw3335_write(dev, 0x4E, reso);
-
-	if (ret < 0){
-		return;
-	}
-
-	return 0;
-}
-
 static int paw3335_sample_fetch(const struct device *dev, enum sensor_channel chan)
 {
 	struct paw3335_data *data = dev->data;
@@ -179,28 +168,47 @@ static int paw3335_channel_get(const struct device *dev, enum sensor_channel cha
 	return 0;
 }
 
-static const struct sensor_driver_api paw3335_api = {
-	.sample_fetch = &paw3335_sample_fetch,
-	.channel_get = &paw3335_channel_get,
-};
-
-static int paw3335_init(const struct device *dev)
+static int paw3335_set_resolution(const struct device *dev, uint8_t reso)
 {
-	struct paw3335_data *data = dev->data;
-	const struct paw3335_config *config = dev->config;
+	//add error checking of reso
+	return paw3335_write(dev, 0x4E, reso);
+}
 
-	uint8_t var_a;
-	uint8_t var_b;
-	uint8_t dev_id;
-	uint8_t reg;
-	uint8_t sample;
+static int paw3335_set_axis(const struct device *dev, uint8_t mask)
+{
+	uint8_t axis;
 
-	data->spi = device_get_binding(config->spi_label);
-		if (data->spi == NULL) {
-		LOG_ERR("Could not get SPI device %s", config->spi_label);
-		return -ENODEV;
+	paw3335_read(dev, 0x5B, &axis, 1);
+	axis = axis & mask;
+
+	return paw3335_write(dev, 0x5B, axis);
+
+}
+
+static int paw3335_set_config(const struct device *dev, enum sensor_config_paw3335 cfg,
+				const struct sensor_value *val)
+{
+	switch (cfg){
+		case SENSOR_CFG_AXIS_SWAP_XY:
+		return paw3335_set_axis(dev, 0x80);
+
+		case SENSOR_CFG_AXIS_INV_Y:
+		return paw3335_set_axis(dev, 0x40);
+
+		case SENSOR_CFG_AXIS_INV_X:
+		return paw3335_set_axis(dev, 0x20);
+
+		case SENSOR_CFG_RESOLUTION:
+		return paw3335_set_resolution(dev, val->val1);
+
+		default:
+		LOG_DBG("Config not supported.");
+		return -ENOTSUP;
 	}
+}
 
+static int paw3335_power_up_init(const struct device *dev)
+{
 	k_msleep(50);
 
 	paw3335_write(dev, 0x3A, 0x5A);
@@ -329,6 +337,43 @@ static int paw3335_init(const struct device *dev)
 	printk("ripple counter = %X\n\n", reso);
 
 	return 0;
+}
+static int paw3335_attr_set(const struct device *dev, , enum sensor_attribute attr, enum sensor_config_paw3335 cfg,
+				const struct sensor_value *val)
+{
+	switch (attr){
+		case SENSOR_ATTR_CONFIGURATION:
+		return paw3335_set_config(dev, cfg, val);
+
+		default:
+		LOG_DBG("Attribute set not supported.");
+		return -ENOTSUP;
+	}
+}
+static const struct sensor_driver_api paw3335_api = {
+	.attr_set = &paw3335_attr_set,
+	.sample_fetch = &paw3335_sample_fetch,
+	.channel_get = &paw3335_channel_get,
+};
+
+static int paw3335_init(const struct device *dev)
+{
+	struct paw3335_data *data = dev->data;
+	const struct paw3335_config *config = dev->config;
+
+	uint8_t var_a;
+	uint8_t var_b;
+	uint8_t dev_id;
+	uint8_t reg;
+	uint8_t sample;
+
+	data->spi = device_get_binding(config->spi_label);
+		if (data->spi == NULL) {
+		LOG_ERR("Could not get SPI device %s", config->spi_label);
+		return -ENODEV;
+	}
+
+	return paw3335_power_up_init(dev);
 }
 
 #define PAW3335_INIT(inst)																							\
