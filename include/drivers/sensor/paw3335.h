@@ -28,9 +28,9 @@ enum sensor_config_paw3335 {
 	SENSOR_CFG_AXIS_INV_X,
 
 	SENSOR_CFG_RESOLUTION
-
-	SENSOR_CFG_PM,
 };
+
+#endif /* ZEPHYR_INCLUDE_DRIVERS_SENSOR_PAW3335_H_ */
 
 
 

@@ -179,16 +179,15 @@ static int paw3335_set_axis(const struct device *dev, uint8_t mask)
 	uint8_t axis;
 
 	paw3335_read(dev, 0x5B, &axis, 1);
-	axis = axis & mask;
+	axis = axis | mask;
 
 	return paw3335_write(dev, 0x5B, axis);
-
 }
 
-static int paw3335_set_config(const struct device *dev, enum sensor_config_paw3335 cfg,
+static int paw3335_set_config(const struct device *dev, enum sensor_attribute cfg,
 				const struct sensor_value *val)
 {
-	switch (cfg){
+	switch ((enum sensor_config_paw3335) cfg){
 		case SENSOR_CFG_AXIS_SWAP_XY:
 		return paw3335_set_axis(dev, 0x80);
 
@@ -209,6 +208,13 @@ static int paw3335_set_config(const struct device *dev, enum sensor_config_paw33
 
 static int paw3335_power_up_init(const struct device *dev)
 {
+	struct paw3335_data *data = dev->data;
+
+	uint8_t var_a;
+	uint8_t var_b;
+	uint8_t reg;
+	uint8_t sample;
+
 	k_msleep(50);
 
 	paw3335_write(dev, 0x3A, 0x5A);
@@ -323,32 +329,16 @@ static int paw3335_power_up_init(const struct device *dev)
 	paw3335_read(dev, 0x05, &data->data_yl, 1);
 	paw3335_read(dev, 0x06, &data->data_yh, 1);
 
-	uint8_t reso;
-	paw3335_write(dev, 0x4E, 0xBD);
-	paw3335_read(dev, 0x4E, &reso, 1);
-	printk("reso = %X\n\n", reso);
-
-	paw3335_read(dev, 0x5A, &reso, 1);
-	printk("ripple counter = %X\n\n", reso);
-	reso = reso | 0x80;
-
-	paw3335_write(dev, 0x5A, reso);
-	paw3335_read(dev, 0x5A, &reso, 1);
-	printk("ripple counter = %X\n\n", reso);
+		paw3335_read(dev, 0x00, &sample, 1);
+	printk("dev id = %x\n", sample);
 
 	return 0;
 }
-static int paw3335_attr_set(const struct device *dev, , enum sensor_attribute attr, enum sensor_config_paw3335 cfg,
+static int paw3335_attr_set(const struct device *dev, enum sensor_channel chan, enum sensor_attribute cfg,
 				const struct sensor_value *val)
 {
-	switch (attr){
-		case SENSOR_ATTR_CONFIGURATION:
-		return paw3335_set_config(dev, cfg, val);
+	return paw3335_set_config(dev, cfg, val);
 
-		default:
-		LOG_DBG("Attribute set not supported.");
-		return -ENOTSUP;
-	}
 }
 static const struct sensor_driver_api paw3335_api = {
 	.attr_set = &paw3335_attr_set,
@@ -361,17 +351,17 @@ static int paw3335_init(const struct device *dev)
 	struct paw3335_data *data = dev->data;
 	const struct paw3335_config *config = dev->config;
 
-	uint8_t var_a;
-	uint8_t var_b;
-	uint8_t dev_id;
-	uint8_t reg;
-	uint8_t sample;
-
 	data->spi = device_get_binding(config->spi_label);
 		if (data->spi == NULL) {
 		LOG_ERR("Could not get SPI device %s", config->spi_label);
 		return -ENODEV;
 	}
+		uint8_t sample;
+
+
+
+
+
 
 	return paw3335_power_up_init(dev);
 }

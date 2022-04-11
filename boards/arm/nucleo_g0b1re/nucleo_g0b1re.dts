@@ -143,13 +143,7 @@ zephyr_udc0: &usb {
 
 	status = "okay";
 
-	paw3335d@0{
-		compatible = "pixart,paw3335d";
-		label = "PAW3335D";
-		spi-max-frequency = <2000000>; /*4Mhz */
-		reg = <0>;
-		status = "okay";
-	};
+
 	// loragw@0{
 	// 	compatible = "ebyte,loragw";
 	// 	label = "LORAGW";
@@ -175,9 +169,18 @@ zephyr_udc0: &usb {
 };
 
 &spi2 {
-	pinctrl-0 = <&spi2_nss_pd0 &spi2_sck_pd1
-		     &spi2_miso_pd3 &spi2_mosi_pd4>;
+	pinctrl-0 = <&spi2_nss_pa8 &spi2_sck_pb10 &spi2_miso_pb2
+				&spi2_mosi_pb11>;
+	/* RF_CS */
 	status = "okay";
+
+		paw3335d@0{
+		compatible = "pixart,paw3335d";
+		label = "PAW3335D";
+		spi-max-frequency = <2000000>; /*4Mhz */
+		reg = <0>;
+		status = "okay";
+	};
 };
 
 &adc1 {

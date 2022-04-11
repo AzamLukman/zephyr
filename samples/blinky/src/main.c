@@ -9,6 +9,7 @@
 #include <devicetree.h>
 #include <drivers/gpio.h>
 #include <drivers/sensor.h>
+#include <drivers/sensor/paw3335.h>
 #include <stdlib.h>
 #include <math.h>
 /* 1000 msec = 1 sec */
@@ -60,6 +61,13 @@ void main(void)
 		return;
 	}
 
+	int rc;
+
+	rc = sensor_attr_set(dev, SENSOR_CHAN_ALL, SENSOR_CFG_AXIS_SWAP_XY, NULL);
+	if (rc < 0) {
+		printk("Could not set attr\n");
+		return;
+	}
 	// if(dev == NULL){
 		// printk("error %s",dev->name);
 	// }

@@ -42,6 +42,7 @@ void main(void)
 	if (ret < 0) {
 		return;
 	}
+	printk("HELLO WORLD!\n");
 
 	while (1) {
 		gpio_pin_set(dev, PIN, (int)led_is_on);
